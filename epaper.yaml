@@ -96,15 +96,74 @@ display:
         return (int) lroundf(strtof(s.c_str(), nullptr));
       };
 
-      auto fmt_power = [](char *buf, int value) {
-        if (abs(value) >= 1000) {
-          sprintf(buf, "%.2f kW", value / 1000.0f);
-        } else {
-          sprintf(buf, "%d W", value);
+      auto clamp = [](int v) { return std::min(100, std::max(0, v)); };
+
+      auto format_power = [](int value, bool show_sign = false) -> std::string {
+        char buf[20];
+        if (show_sign && value == 0) {
+          snprintf(buf, sizeof(buf), "0 W");
+          return std::string(buf);
         }
+        if (abs(value) >= 1000) {
+          snprintf(buf, sizeof(buf), show_sign ? "%+.2f kW" : "%.2f kW", value / 1000.0f);
+        } else {
+          snprintf(buf, sizeof(buf), show_sign ? "%+d W" : "%d W", value);
+        }
+        return std::string(buf);
       };
 
-      auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
+      auto format_pct = [](int pct) -> std::string {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d%%", pct);
+        return std::string(buf);
+      };
+
+      auto format_temp = [](int value) -> std::string {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d °C", value);
+        return std::string(buf);
+      };
+
+      auto format_time_to_full = [](const std::string &state) -> std::string {
+        if (state.empty() || state == "unknown" || state == "unavailable") {
+          return "";
+        }
+        float hours_f = strtof(state.c_str(), nullptr);
+        if (!(hours_f > 0.0f && hours_f < 999.0f)) {
+          return "";
+        }
+        int hours = (int) floorf(hours_f);
+        int minutes = (int) lroundf((hours_f - hours) * 60.0f);
+        if (minutes >= 60) {
+          minutes -= 60;
+          hours += 1;
+        }
+
+        char buf[40];
+        if (hours > 0) {
+          snprintf(buf, sizeof(buf), "voll in %dh %02dmin", hours, minutes);
+        } else {
+          snprintf(buf, sizeof(buf), "voll in %dmin", minutes);
+        }
+        return std::string(buf);
+      };
+
+      const int start_y = 40;
+      const int row_height = 50;
+      const int label_x = 40;
+      const int value_x = 320;
+      const int detail_x = 620;
+      int row = 0;
+
+      auto print_row = [&](const char *label, const std::string &value, const std::string &detail = std::string()) {
+        int y = start_y + row * row_height;
+        it.printf(label_x, y, id(smallFont), "%s", label);
+        it.printf(value_x, y, id(myFont), "%s", value.c_str());
+        if (!detail.empty()) {
+          it.printf(detail_x, y, id(smallFont), "%s", detail.c_str());
+        }
+        row++;
+      };
 
       // ---- Werte holen ----
       int vHaus = as_int(id(SysLoadPwr).state);
@@ -129,54 +188,39 @@ display:
       int heat_pct = clamp((int) lroundf((vHeat /  9000.0f) * 100.0f));
       int grid_pct = (vGrid < 0) ? clamp((int) lroundf((abs(vGrid) / 7560.0f) * 100.0f)) : 0;
 
-      // Formatpuffer
-      char sHaus[20], sPV[20], sHeat[20], sGrid[20], sBat[20], sEQA[20], sBezug[20], sEins[20];
-
-      fmt_power(sHaus, vHaus);
-      fmt_power(sPV,   vPV);
-      fmt_power(sHeat, vHeat);
-      fmt_power(sGrid, vGrid);
-      fmt_power(sBat,  vBat);
-      fmt_power(sEQA,  vEQA);
-      fmt_power(sBezug, vBezug);
-      fmt_power(sEins,  vEinspeisung);
-
       // ---- Anzeige ----
-      it.printf(20,  20, id(myFont), "PV: %s (%d%%)", sPV, pv_pct);
-      it.printf(300, 20, id(myFont), "Bezug: %s",       sBezug);
-      it.printf(50,  70, id(myFont), "Haus: %s", sHaus);
-      
-      if (vGrid < 0)
-        it.printf(50, 120, id(myFont), "Netz: %s (%d%%)", sGrid, grid_pct);
-      else
-        it.printf(50, 120, id(myFont), "Netz: %s", sGrid);
+      it.printf(40, 0, id(smallFont), "Energieübersicht");
 
-      
-      it.printf(50, 170, id(myFont), "Einspeisung: %s", sEins);
-      it.printf(50, 220, id(myFont), "Heizstab: %s (%d%%)", sHeat, heat_pct);
-      it.printf(50, 270, id(myFont), "EQA: %s", sEQA);
-      it.printf(500, 70, id(myFont), "WW: %d°C", vWW);
+      std::string pv_detail = format_pct(pv_pct);
+      std::string eins_detail = (vEinspeisung > 0) ? format_pct(grid_pct) : "";
+      std::string heat_detail = format_pct(heat_pct);
+      std::string eq_detail = (vEQA > 0) ? "aktiv" : "aus";
 
-      // Batterie inkl. SOC + optionale Zeit bis voll (Floatstunden -> h/min)
-      char sBatLine[64];
-      if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
-        float hours_f = strtof(sZeit.c_str(), nullptr);
-        if (hours_f > 0.0f && hours_f < 999.0f) {
-          int hours   = (int) floorf(hours_f);
-          int minutes = (int) lroundf((hours_f - hours) * 60.0f);
-          if (minutes >= 60) { minutes -= 60; hours += 1; }
-          sprintf(sBatLine, "%s (%d%%) | %dh %02dmin", sBat, vSOC, hours, minutes);
-        } else {
-          sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
-        }
-      } else {
-        sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
+      std::string battery_detail = "SOC: " + std::to_string(clamp(vSOC)) + "%";
+      std::string battery_time = format_time_to_full(sZeit);
+      if (!battery_time.empty()) {
+        battery_detail += " | " + battery_time;
       }
-      it.printf(50, 320, id(myFont), "Batterie: %s", sBatLine);
+      if (vBat > 0) {
+        battery_detail += " | lädt";
+      } else if (vBat < 0) {
+        battery_detail += " | entlädt";
+      } else {
+        battery_detail += " | hält Niveau";
+      }
+
+      print_row("PV-Produktion", format_power(vPV), pv_detail);
+      print_row("Hausverbrauch", format_power(vHaus));
+      print_row("Netzbezug", format_power(vBezug));
+      print_row("Netzeinspeisung", format_power(vEinspeisung), eins_detail);
+      print_row("Heizstab", format_power(vHeat), heat_detail);
+      print_row("Wallbox (EQA)", format_power(vEQA), eq_detail);
+      print_row("Warmwasser oben", format_temp(vWW));
+      print_row("Batterieleistung", format_power(vBat, true), battery_detail);
 
       // --- SOC-Balken (unterhalb, mit 10%-Ticks) ---
       const int bar_x = 50;
-      const int bar_y = 450;     // innerhalb 480 px Höhe bleiben
+      const int bar_y = 430;     // innerhalb 480 px Höhe bleiben
       const int bar_w = 700;
       const int bar_h = 20;
 
