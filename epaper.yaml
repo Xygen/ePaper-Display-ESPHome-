@@ -33,6 +33,9 @@ font:
   - file: "gfonts://Inter@700"
     id: smallFont
     size: 30
+  - file: "gfonts://Inter@500"
+    id: tinyFont
+    size: 24
 
 text_sensor:
   - platform: homeassistant
@@ -142,41 +145,83 @@ display:
       fmt_power(sEins,  vEinspeisung);
 
       // ---- Anzeige ----
-      it.printf(20,  20, id(myFont), "PV: %s (%d%%)", sPV, pv_pct);
-      it.printf(300, 20, id(myFont), "Bezug: %s",       sBezug);
-      it.printf(50,  70, id(myFont), "Haus: %s", sHaus);
-      
-      if (vGrid < 0)
-        it.printf(50, 120, id(myFont), "Netz: %s (%d%%)", sGrid, grid_pct);
-      else
-        it.printf(50, 120, id(myFont), "Netz: %s", sGrid);
+      // Formatierungstexte für die Boxen vorbereiten
+      char sPvExtra[40];
+      snprintf(sPvExtra, sizeof(sPvExtra), "Auslastung: %d%%", pv_pct);
 
-      
-      it.printf(50, 170, id(myFont), "Einspeisung: %s", sEins);
-      it.printf(50, 220, id(myFont), "Heizstab: %s (%d%%)", sHeat, heat_pct);
-      it.printf(50, 270, id(myFont), "EQA: %s", sEQA);
-      it.printf(500, 70, id(myFont), "WW: %d°C", vWW);
+      char sHausExtra[64];
+      snprintf(sHausExtra, sizeof(sHausExtra), "zzgl. Heizstab: %s", sHeat);
+
+      char sHeatExtra[32];
+      snprintf(sHeatExtra, sizeof(sHeatExtra), "Last: %d%%", heat_pct);
+
+      char sGridStatus[40];
+      if (vGrid < 0)
+        snprintf(sGridStatus, sizeof(sGridStatus), "Export: %d%%", grid_pct);
+      else if (vGrid > 0)
+        snprintf(sGridStatus, sizeof(sGridStatus), "Import");
+      else
+        snprintf(sGridStatus, sizeof(sGridStatus), "Ausgeglichen");
+
+      char sWW[20];
+      snprintf(sWW, sizeof(sWW), "%d°C", vWW);
 
       // Batterie inkl. SOC + optionale Zeit bis voll (Floatstunden -> h/min)
-      char sBatLine[64];
+      bool has_charge_time = false;
+      int charge_hours = 0;
+      int charge_minutes = 0;
       if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
         float hours_f = strtof(sZeit.c_str(), nullptr);
         if (hours_f > 0.0f && hours_f < 999.0f) {
-          int hours   = (int) floorf(hours_f);
-          int minutes = (int) lroundf((hours_f - hours) * 60.0f);
-          if (minutes >= 60) { minutes -= 60; hours += 1; }
-          sprintf(sBatLine, "%s (%d%%) | %dh %02dmin", sBat, vSOC, hours, minutes);
-        } else {
-          sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
+          has_charge_time = true;
+          charge_hours = (int) floorf(hours_f);
+          charge_minutes = (int) lroundf((hours_f - charge_hours) * 60.0f);
+          if (charge_minutes >= 60) { charge_minutes -= 60; charge_hours += 1; }
         }
-      } else {
-        sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
       }
-      it.printf(50, 320, id(myFont), "Batterie: %s", sBatLine);
+
+      char sBatExtra[48];
+      if (has_charge_time) {
+        snprintf(sBatExtra, sizeof(sBatExtra), "SOC: %d%%  |  %dh %02dmin", vSOC, charge_hours, charge_minutes);
+      } else {
+        snprintf(sBatExtra, sizeof(sBatExtra), "SOC: %d%%", vSOC);
+      }
+
+      // Layout-Helfer für strukturierte Boxen
+      auto draw_section = [&](int x, int y, int w, int h, const char *title, const char *value, const char *subtitle = nullptr) {
+        it.rectangle(x, y, w, h);
+        it.printf(x + 12, y + 10, id(smallFont), esphome::display::TextAlign::TOP_LEFT, "%s", title);
+        it.printf(x + w - 12, y + h / 2 + 10, id(myFont), esphome::display::TextAlign::BASELINE_RIGHT, "%s", value);
+        if (subtitle != nullptr && subtitle[0] != '\0') {
+          it.printf(x + w - 12, y + h - 14, id(tinyFont), esphome::display::TextAlign::BASELINE_RIGHT, "%s", subtitle);
+        }
+      };
+
+      const int col_w = 240;
+      const int row_h = 120;
+      const int gap = 20;
+
+      int row1_y = 20;
+      int row2_y = row1_y + row_h + gap;
+      int row3_y = row2_y + row_h + gap;
+
+      draw_section(20,  row1_y, col_w, row_h, "PV-Ertrag", sPV, sPvExtra);
+      draw_section(280, row1_y, col_w, row_h, "Hausverbrauch", sHaus, sHausExtra);
+      draw_section(540, row1_y, col_w, row_h, "Batterie", sBat, sBatExtra);
+
+      draw_section(20,  row2_y, col_w, row_h, "Netz", sGrid, sGridStatus);
+      draw_section(280, row2_y, col_w, row_h, "Heizstab", sHeat, sHeatExtra);
+      draw_section(540, row2_y, col_w, row_h, "EQA Ladung", sEQA);
+
+      draw_section(20, row3_y, col_w, row_h, "Warmwasser oben", sWW);
+      draw_section(280, row3_y, col_w, row_h, "Bezug", sBezug);
+      draw_section(540, row3_y, col_w, row_h, "Einspeisung", sEins);
+
+      it.printf(50, row3_y + row_h + 30, id(smallFont), "Batterie-SOC");
 
       // --- SOC-Balken (unterhalb, mit 10%-Ticks) ---
       const int bar_x = 50;
-      const int bar_y = 450;     // innerhalb 480 px Höhe bleiben
+      const int bar_y = row3_y + row_h + 50;     // innerhalb 480 px Höhe bleiben
       const int bar_w = 700;
       const int bar_h = 20;
 
