@@ -1,0 +1,195 @@
+esphome:
+  name: epaper
+  friendly_name: ePaper
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: "JpvERJsHgGmgv6zi3tPtTDR7cXTkMIcoAQmbiOCEFxw="
+
+ota:
+  - platform: esphome
+    password: "7c8ebe25a7a6df2e6666c3819e572e2b"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Epaper Fallback Hotspot"
+    password: "hCW8fSx9zqiz"
+
+captive_portal:
+
+font:
+  - file: "gfonts://Inter@600"
+    id: myFont
+    size: 40
+  - file: "gfonts://Inter@700"
+    id: smallFont
+    size: 30
+
+text_sensor:
+  - platform: homeassistant
+    entity_id: sensor.powerocean_sysloadpwr
+    id: SysLoadPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_sysgridpwr
+    id: SysGridPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_bppwr
+    id: BatPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_mpptpwr
+    id: PVPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_bpsoc
+    id: BatSOC
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_heizstab_power
+    id: HeatPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.shelly_plug_mercedes_eqa_250_power
+    id: EQAPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.pufferspeicher_oben
+    id: WarmWasser
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_zeit_bis_batterie_voll
+    id: ZeitBisVoll
+    internal: true
+
+spi:
+  clk_pin: GPIO8
+  mosi_pin: GPIO10
+
+display:
+  - platform: waveshare_epaper
+    cs_pin: GPIO3
+    dc_pin: GPIO5
+    busy_pin:
+      number: GPIO4
+      inverted: true
+    reset_pin: GPIO2
+    model: 7.50inv2
+    update_interval: 30s
+    lambda: |-
+      // ---- Helpers ----
+      auto as_int = [](const std::string &s) -> int {
+        if (s.empty() || s == "unavailable" || s == "unknown" || s == "None" ||
+            s == "none" || s == "nan" || s == "NaN") {
+          return 0;
+        }
+        return (int) lroundf(strtof(s.c_str(), nullptr));
+      };
+
+      auto fmt_power = [](char *buf, int value) {
+        if (abs(value) >= 1000) {
+          sprintf(buf, "%.2f kW", value / 1000.0f);
+        } else {
+          sprintf(buf, "%d W", value);
+        }
+      };
+
+      auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
+
+      // ---- Werte holen ----
+      int vHaus = as_int(id(SysLoadPwr).state);
+      int vPV   = as_int(id(PVPwr).state);
+      int vGrid = as_int(id(SysGridPwr).state);
+      int vHeat = as_int(id(HeatPwr).state);
+      int vBat  = as_int(id(BatPwr).state);
+      int vSOC  = as_int(id(BatSOC).state);
+      int vEQA  = as_int(id(EQAPwr).state);
+      int vWW   = as_int(id(WarmWasser).state);
+      std::string sZeit = id(ZeitBisVoll).state;
+
+      // Haus ohne Heizstab anzeigen
+      vHaus = vHaus - vHeat;
+
+      // Bezug/Einspeisung aufspalten
+      int vBezug       = (vGrid > 0) ? vGrid : 0;
+      int vEinspeisung = (vGrid < 0) ? abs(vGrid) : 0;
+
+      // Prozentwerte
+      int pv_pct   = clamp((int) lroundf((vPV   / 12600.0f) * 100.0f));
+      int heat_pct = clamp((int) lroundf((vHeat /  9000.0f) * 100.0f));
+      int grid_pct = (vGrid < 0) ? clamp((int) lroundf((abs(vGrid) / 7560.0f) * 100.0f)) : 0;
+
+      // Formatpuffer
+      char sHaus[20], sPV[20], sHeat[20], sGrid[20], sBat[20], sEQA[20], sBezug[20], sEins[20];
+
+      fmt_power(sHaus, vHaus);
+      fmt_power(sPV,   vPV);
+      fmt_power(sHeat, vHeat);
+      fmt_power(sGrid, vGrid);
+      fmt_power(sBat,  vBat);
+      fmt_power(sEQA,  vEQA);
+      fmt_power(sBezug, vBezug);
+      fmt_power(sEins,  vEinspeisung);
+
+      // ---- Anzeige ----
+      it.printf(20,  20, id(myFont), "PV: %s (%d%%)", sPV, pv_pct);
+      it.printf(300, 20, id(myFont), "Bezug: %s",       sBezug);
+      it.printf(50,  70, id(myFont), "Haus: %s", sHaus);
+      
+      if (vGrid < 0)
+        it.printf(50, 120, id(myFont), "Netz: %s (%d%%)", sGrid, grid_pct);
+      else
+        it.printf(50, 120, id(myFont), "Netz: %s", sGrid);
+
+      
+      it.printf(50, 170, id(myFont), "Einspeisung: %s", sEins);
+      it.printf(50, 220, id(myFont), "Heizstab: %s (%d%%)", sHeat, heat_pct);
+      it.printf(50, 270, id(myFont), "EQA: %s", sEQA);
+      it.printf(500, 70, id(myFont), "WW: %d°C", vWW);
+
+      // Batterie inkl. SOC + optionale Zeit bis voll (Floatstunden -> h/min)
+      char sBatLine[64];
+      if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
+        float hours_f = strtof(sZeit.c_str(), nullptr);
+        if (hours_f > 0.0f && hours_f < 999.0f) {
+          int hours   = (int) floorf(hours_f);
+          int minutes = (int) lroundf((hours_f - hours) * 60.0f);
+          if (minutes >= 60) { minutes -= 60; hours += 1; }
+          sprintf(sBatLine, "%s (%d%%) | %dh %02dmin", sBat, vSOC, hours, minutes);
+        } else {
+          sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
+        }
+      } else {
+        sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
+      }
+      it.printf(50, 320, id(myFont), "Batterie: %s", sBatLine);
+
+      // --- SOC-Balken (unterhalb, mit 10%-Ticks) ---
+      const int bar_x = 50;
+      const int bar_y = 450;     // innerhalb 480 px Höhe bleiben
+      const int bar_w = 700;
+      const int bar_h = 20;
+
+      // Rahmen
+      it.rectangle(bar_x, bar_y, bar_w, bar_h);
+
+      // Füllung
+      int soc_clamped = clamp(vSOC);
+      int fill_w = (bar_w * soc_clamped) / 100;
+      if (fill_w > 0) it.filled_rectangle(bar_x, bar_y, fill_w, bar_h);
+
+      // Ticks (unterhalb des Balkens, kurze Linien)
+      for (int i = 0; i <= 10; i++) {
+        int tx = bar_x + (bar_w * i) / 10;
+        it.line(tx, bar_y + bar_h + 2, tx, bar_y + bar_h + 8);
+      }
