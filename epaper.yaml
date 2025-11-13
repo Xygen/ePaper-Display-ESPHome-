@@ -99,15 +99,74 @@ display:
         return (int) lroundf(strtof(s.c_str(), nullptr));
       };
 
-      auto fmt_power = [](char *buf, int value) {
-        if (abs(value) >= 1000) {
-          sprintf(buf, "%.2f kW", value / 1000.0f);
-        } else {
-          sprintf(buf, "%d W", value);
+      auto clamp = [](int v) { return std::min(100, std::max(0, v)); };
+
+      auto format_power = [](int value, bool show_sign = false) -> std::string {
+        char buf[20];
+        if (show_sign && value == 0) {
+          snprintf(buf, sizeof(buf), "0 W");
+          return std::string(buf);
         }
+        if (abs(value) >= 1000) {
+          snprintf(buf, sizeof(buf), show_sign ? "%+.2f kW" : "%.2f kW", value / 1000.0f);
+        } else {
+          snprintf(buf, sizeof(buf), show_sign ? "%+d W" : "%d W", value);
+        }
+        return std::string(buf);
       };
 
-      auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
+      auto format_pct = [](int pct) -> std::string {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d%%", pct);
+        return std::string(buf);
+      };
+
+      auto format_temp = [](int value) -> std::string {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d °C", value);
+        return std::string(buf);
+      };
+
+      auto format_time_to_full = [](const std::string &state) -> std::string {
+        if (state.empty() || state == "unknown" || state == "unavailable") {
+          return "";
+        }
+        float hours_f = strtof(state.c_str(), nullptr);
+        if (!(hours_f > 0.0f && hours_f < 999.0f)) {
+          return "";
+        }
+        int hours = (int) floorf(hours_f);
+        int minutes = (int) lroundf((hours_f - hours) * 60.0f);
+        if (minutes >= 60) {
+          minutes -= 60;
+          hours += 1;
+        }
+
+        char buf[40];
+        if (hours > 0) {
+          snprintf(buf, sizeof(buf), "voll in %dh %02dmin", hours, minutes);
+        } else {
+          snprintf(buf, sizeof(buf), "voll in %dmin", minutes);
+        }
+        return std::string(buf);
+      };
+
+      const int start_y = 40;
+      const int row_height = 50;
+      const int label_x = 40;
+      const int value_x = 320;
+      const int detail_x = 620;
+      int row = 0;
+
+      auto print_row = [&](const char *label, const std::string &value, const std::string &detail = std::string()) {
+        int y = start_y + row * row_height;
+        it.printf(label_x, y, id(smallFont), "%s", label);
+        it.printf(value_x, y, id(myFont), "%s", value.c_str());
+        if (!detail.empty()) {
+          it.printf(detail_x, y, id(smallFont), "%s", detail.c_str());
+        }
+        row++;
+      };
 
       // ---- Werte holen ----
       int vHaus = as_int(id(SysLoadPwr).state);
