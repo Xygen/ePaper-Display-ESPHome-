@@ -28,11 +28,14 @@ captive_portal:
 
 font:
   - file: "gfonts://Inter@600"
-    id: myFont
+    id: valueFont
     size: 40
   - file: "gfonts://Inter@700"
-    id: smallFont
+    id: detailFont
     size: 30
+  - file: "gfonts://Inter@600"
+    id: titleFont
+    size: 24
 
 text_sensor:
   - platform: homeassistant
@@ -141,44 +144,85 @@ display:
       fmt_power(sBezug, vBezug);
       fmt_power(sEins,  vEinspeisung);
 
-      // ---- Anzeige ----
-      it.printf(20,  20, id(myFont), "PV: %s (%d%%)", sPV, pv_pct);
-      it.printf(300, 20, id(myFont), "Bezug: %s",       sBezug);
-      it.printf(50,  70, id(myFont), "Haus: %s", sHaus);
-      
-      if (vGrid < 0)
-        it.printf(50, 120, id(myFont), "Netz: %s (%d%%)", sGrid, grid_pct);
-      else
-        it.printf(50, 120, id(myFont), "Netz: %s", sGrid);
+      // Gemeinsame Footer-Texte vorbereiten
+      char sPvFooter[16];
+      sprintf(sPvFooter, "%d%%", pv_pct);
 
-      
-      it.printf(50, 170, id(myFont), "Einspeisung: %s", sEins);
-      it.printf(50, 220, id(myFont), "Heizstab: %s (%d%%)", sHeat, heat_pct);
-      it.printf(50, 270, id(myFont), "EQA: %s", sEQA);
-      it.printf(500, 70, id(myFont), "WW: %d°C", vWW);
+      char sHeatInfo[48];
+      snprintf(sHeatInfo, sizeof(sHeatInfo), "Heizstab: %s (%d%%)", sHeat, heat_pct);
+
+      char sGridFooter[48];
+      if (vGrid < 0) {
+        snprintf(sGridFooter, sizeof(sGridFooter), "Einspeisung: %s (%d%%)", sEins, grid_pct);
+      } else if (vGrid > 0) {
+        snprintf(sGridFooter, sizeof(sGridFooter), "Bezug: %s", sBezug);
+      } else {
+        snprintf(sGridFooter, sizeof(sGridFooter), "Bezug/Einspeisung: 0 W");
+      }
+
+      char sBatteryTitle[32];
+      sprintf(sBatteryTitle, "Batterie (%d%%)", clamp(vSOC));
 
       // Batterie inkl. SOC + optionale Zeit bis voll (Floatstunden -> h/min)
-      char sBatLine[64];
+      char sBatFooter[48];
       if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
         float hours_f = strtof(sZeit.c_str(), nullptr);
         if (hours_f > 0.0f && hours_f < 999.0f) {
           int hours   = (int) floorf(hours_f);
           int minutes = (int) lroundf((hours_f - hours) * 60.0f);
           if (minutes >= 60) { minutes -= 60; hours += 1; }
-          sprintf(sBatLine, "%s (%d%%) | %dh %02dmin", sBat, vSOC, hours, minutes);
+          sprintf(sBatFooter, "SOC %d%% | %dh %02dmin", clamp(vSOC), hours, minutes);
         } else {
-          sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
+          sprintf(sBatFooter, "SOC %d%%", clamp(vSOC));
         }
       } else {
-        sprintf(sBatLine, "%s (%d%%)", sBat, vSOC);
+        sprintf(sBatFooter, "SOC %d%%", clamp(vSOC));
       }
-      it.printf(50, 320, id(myFont), "Batterie: %s", sBatLine);
+
+      char sWarm[16];
+      sprintf(sWarm, "%d°C", vWW);
+
+      // Hilfsfunktion für Kartenlayout
+      auto draw_card = [&](int x, int y, int w, int h, const char *title, const char *value, const char *footer = "") {
+        it.rectangle(x, y, w, h);
+        it.printf(x + 12, y + 14, id(titleFont), "%s", title);
+        it.printf(x + w / 2, y + h / 2, id(valueFont), TextAlign::CENTER, "%s", value);
+        if (footer && footer[0] != '\0') {
+          it.printf(x + w / 2, y + h - 32, id(detailFont), TextAlign::CENTER, "%s", footer);
+        }
+      };
+
+      // ---- Anzeige ----
+      const int card_w = 240;
+      const int card_h = 120;
+      const int margin_x = 20;
+      const int margin_y = 20;
+      const int gap_x = 20;
+      const int gap_y = 20;
+
+      // Erste Zeile
+      draw_card(margin_x, margin_y, card_w, card_h, "PV", sPV, sPvFooter);
+      draw_card(margin_x + (card_w + gap_x), margin_y, card_w, card_h, "Haus", sHaus, sHeatInfo);
+      draw_card(margin_x + 2 * (card_w + gap_x), margin_y, card_w, card_h, "Netz", sGrid, sGridFooter);
+
+      // Zweite Zeile
+      int row2_y = margin_y + card_h + gap_y;
+      draw_card(margin_x, row2_y, card_w, card_h, "Bezug", sBezug);
+      draw_card(margin_x + (card_w + gap_x), row2_y, card_w, card_h, "Einspeisung", sEins);
+      draw_card(margin_x + 2 * (card_w + gap_x), row2_y, card_w, card_h, "EQA", sEQA);
+
+      // Dritte Zeile
+      int row3_y = row2_y + card_h + gap_y;
+      draw_card(margin_x, row3_y, card_w, card_h, "Warmwasser", sWarm);
+      draw_card(margin_x + (card_w + gap_x), row3_y, 2 * card_w + gap_x, card_h, sBatteryTitle, sBat, sBatFooter);
 
       // --- SOC-Balken (unterhalb, mit 10%-Ticks) ---
-      const int bar_x = 50;
-      const int bar_y = 450;     // innerhalb 480 px Höhe bleiben
-      const int bar_w = 700;
+      const int bar_x = margin_x;
+      const int bar_y = row3_y + card_h + gap_y;
+      const int bar_w = 760;
       const int bar_h = 20;
+
+      it.printf(bar_x, bar_y - 30, id(detailFont), "SOC Verlauf");
 
       // Rahmen
       it.rectangle(bar_x, bar_y, bar_w, bar_h);
@@ -191,5 +235,7 @@ display:
       // Ticks (unterhalb des Balkens, kurze Linien)
       for (int i = 0; i <= 10; i++) {
         int tx = bar_x + (bar_w * i) / 10;
-        it.line(tx, bar_y + bar_h + 2, tx, bar_y + bar_h + 8);
+        it.line(tx, bar_y + bar_h + 2, tx, bar_y + bar_h + 10);
+        it.printf(tx, bar_y + bar_h + 14, id(titleFont), TextAlign::CENTER, "%d", i * 10);
       }
+
