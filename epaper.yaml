@@ -28,13 +28,13 @@ captive_portal:
 
 font:
   - file: "gfonts://Inter@600"
-    id: valueFont
+    id: myFont
     size: 40
   - file: "gfonts://Inter@700"
-    id: detailFont
+    id: smallFont
     size: 30
-  - file: "gfonts://Inter@600"
-    id: titleFont
+  - file: "gfonts://Inter@500"
+    id: tinyFont
     size: 24
 
 text_sensor:
@@ -99,15 +99,74 @@ display:
         return (int) lroundf(strtof(s.c_str(), nullptr));
       };
 
-      auto fmt_power = [](char *buf, int value) {
-        if (abs(value) >= 1000) {
-          sprintf(buf, "%.2f kW", value / 1000.0f);
-        } else {
-          sprintf(buf, "%d W", value);
+      auto clamp = [](int v) { return std::min(100, std::max(0, v)); };
+
+      auto format_power = [](int value, bool show_sign = false) -> std::string {
+        char buf[20];
+        if (show_sign && value == 0) {
+          snprintf(buf, sizeof(buf), "0 W");
+          return std::string(buf);
         }
+        if (abs(value) >= 1000) {
+          snprintf(buf, sizeof(buf), show_sign ? "%+.2f kW" : "%.2f kW", value / 1000.0f);
+        } else {
+          snprintf(buf, sizeof(buf), show_sign ? "%+d W" : "%d W", value);
+        }
+        return std::string(buf);
       };
 
-      auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
+      auto format_pct = [](int pct) -> std::string {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d%%", pct);
+        return std::string(buf);
+      };
+
+      auto format_temp = [](int value) -> std::string {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d °C", value);
+        return std::string(buf);
+      };
+
+      auto format_time_to_full = [](const std::string &state) -> std::string {
+        if (state.empty() || state == "unknown" || state == "unavailable") {
+          return "";
+        }
+        float hours_f = strtof(state.c_str(), nullptr);
+        if (!(hours_f > 0.0f && hours_f < 999.0f)) {
+          return "";
+        }
+        int hours = (int) floorf(hours_f);
+        int minutes = (int) lroundf((hours_f - hours) * 60.0f);
+        if (minutes >= 60) {
+          minutes -= 60;
+          hours += 1;
+        }
+
+        char buf[40];
+        if (hours > 0) {
+          snprintf(buf, sizeof(buf), "voll in %dh %02dmin", hours, minutes);
+        } else {
+          snprintf(buf, sizeof(buf), "voll in %dmin", minutes);
+        }
+        return std::string(buf);
+      };
+
+      const int start_y = 40;
+      const int row_height = 50;
+      const int label_x = 40;
+      const int value_x = 320;
+      const int detail_x = 620;
+      int row = 0;
+
+      auto print_row = [&](const char *label, const std::string &value, const std::string &detail = std::string()) {
+        int y = start_y + row * row_height;
+        it.printf(label_x, y, id(smallFont), "%s", label);
+        it.printf(value_x, y, id(myFont), "%s", value.c_str());
+        if (!detail.empty()) {
+          it.printf(detail_x, y, id(smallFont), "%s", detail.c_str());
+        }
+        row++;
+      };
 
       // ---- Werte holen ----
       int vHaus = as_int(id(SysLoadPwr).state);
@@ -144,85 +203,86 @@ display:
       fmt_power(sBezug, vBezug);
       fmt_power(sEins,  vEinspeisung);
 
-      // Gemeinsame Footer-Texte vorbereiten
-      char sPvFooter[16];
-      sprintf(sPvFooter, "%d%%", pv_pct);
+      // ---- Anzeige ----
+      // Formatierungstexte für die Boxen vorbereiten
+      char sPvExtra[40];
+      snprintf(sPvExtra, sizeof(sPvExtra), "Auslastung: %d%%", pv_pct);
 
-      char sHeatInfo[48];
-      snprintf(sHeatInfo, sizeof(sHeatInfo), "Heizstab: %s (%d%%)", sHeat, heat_pct);
+      char sHausExtra[64];
+      snprintf(sHausExtra, sizeof(sHausExtra), "zzgl. Heizstab: %s", sHeat);
 
-      char sGridFooter[48];
-      if (vGrid < 0) {
-        snprintf(sGridFooter, sizeof(sGridFooter), "Einspeisung: %s (%d%%)", sEins, grid_pct);
-      } else if (vGrid > 0) {
-        snprintf(sGridFooter, sizeof(sGridFooter), "Bezug: %s", sBezug);
-      } else {
-        snprintf(sGridFooter, sizeof(sGridFooter), "Bezug/Einspeisung: 0 W");
-      }
+      char sHeatExtra[32];
+      snprintf(sHeatExtra, sizeof(sHeatExtra), "Last: %d%%", heat_pct);
 
-      char sBatteryTitle[32];
-      sprintf(sBatteryTitle, "Batterie (%d%%)", clamp(vSOC));
+      char sGridStatus[40];
+      if (vGrid < 0)
+        snprintf(sGridStatus, sizeof(sGridStatus), "Export: %d%%", grid_pct);
+      else if (vGrid > 0)
+        snprintf(sGridStatus, sizeof(sGridStatus), "Import");
+      else
+        snprintf(sGridStatus, sizeof(sGridStatus), "Ausgeglichen");
+
+      char sWW[20];
+      snprintf(sWW, sizeof(sWW), "%d°C", vWW);
 
       // Batterie inkl. SOC + optionale Zeit bis voll (Floatstunden -> h/min)
-      char sBatFooter[48];
+      bool has_charge_time = false;
+      int charge_hours = 0;
+      int charge_minutes = 0;
       if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
         float hours_f = strtof(sZeit.c_str(), nullptr);
         if (hours_f > 0.0f && hours_f < 999.0f) {
-          int hours   = (int) floorf(hours_f);
-          int minutes = (int) lroundf((hours_f - hours) * 60.0f);
-          if (minutes >= 60) { minutes -= 60; hours += 1; }
-          sprintf(sBatFooter, "SOC %d%% | %dh %02dmin", clamp(vSOC), hours, minutes);
-        } else {
-          sprintf(sBatFooter, "SOC %d%%", clamp(vSOC));
+          has_charge_time = true;
+          charge_hours = (int) floorf(hours_f);
+          charge_minutes = (int) lroundf((hours_f - charge_hours) * 60.0f);
+          if (charge_minutes >= 60) { charge_minutes -= 60; charge_hours += 1; }
         }
-      } else {
-        sprintf(sBatFooter, "SOC %d%%", clamp(vSOC));
       }
 
-      char sWarm[16];
-      sprintf(sWarm, "%d°C", vWW);
+      char sBatExtra[48];
+      if (has_charge_time) {
+        snprintf(sBatExtra, sizeof(sBatExtra), "SOC: %d%%  |  %dh %02dmin", vSOC, charge_hours, charge_minutes);
+      } else {
+        snprintf(sBatExtra, sizeof(sBatExtra), "SOC: %d%%", vSOC);
+      }
 
-      // Hilfsfunktion für Kartenlayout
-      auto draw_card = [&](int x, int y, int w, int h, const char *title, const char *value, const char *footer = "") {
+      // Layout-Helfer für strukturierte Boxen
+      auto draw_section = [&](int x, int y, int w, int h, const char *title, const char *value, const char *subtitle = nullptr) {
         it.rectangle(x, y, w, h);
-        it.printf(x + 12, y + 14, id(titleFont), "%s", title);
-        it.printf(x + w / 2, y + h / 2, id(valueFont), TextAlign::CENTER, "%s", value);
-        if (footer && footer[0] != '\0') {
-          it.printf(x + w / 2, y + h - 32, id(detailFont), TextAlign::CENTER, "%s", footer);
+        it.printf(x + 12, y + 10, id(smallFont), esphome::display::TextAlign::TOP_LEFT, "%s", title);
+        it.printf(x + w - 12, y + h / 2 + 10, id(myFont), esphome::display::TextAlign::BASELINE_RIGHT, "%s", value);
+        if (subtitle != nullptr && subtitle[0] != '\0') {
+          it.printf(x + w - 12, y + h - 14, id(tinyFont), esphome::display::TextAlign::BASELINE_RIGHT, "%s", subtitle);
         }
       };
 
-      // ---- Anzeige ----
-      const int card_w = 240;
-      const int card_h = 120;
-      const int margin_x = 20;
-      const int margin_y = 20;
-      const int gap_x = 20;
-      const int gap_y = 20;
+      const int col_w = 240;
+      const int row_h = 120;
+      const int gap = 20;
 
-      // Erste Zeile
-      draw_card(margin_x, margin_y, card_w, card_h, "PV", sPV, sPvFooter);
-      draw_card(margin_x + (card_w + gap_x), margin_y, card_w, card_h, "Haus", sHaus, sHeatInfo);
-      draw_card(margin_x + 2 * (card_w + gap_x), margin_y, card_w, card_h, "Netz", sGrid, sGridFooter);
+      int row1_y = 20;
+      int row2_y = row1_y + row_h + gap;
+      int row3_y = row2_y + row_h + gap;
 
-      // Zweite Zeile
-      int row2_y = margin_y + card_h + gap_y;
-      draw_card(margin_x, row2_y, card_w, card_h, "Bezug", sBezug);
-      draw_card(margin_x + (card_w + gap_x), row2_y, card_w, card_h, "Einspeisung", sEins);
-      draw_card(margin_x + 2 * (card_w + gap_x), row2_y, card_w, card_h, "EQA", sEQA);
+      draw_section(20,  row1_y, col_w, row_h, "PV-Ertrag", sPV, sPvExtra);
+      draw_section(280, row1_y, col_w, row_h, "Hausverbrauch", sHaus, sHausExtra);
+      draw_section(540, row1_y, col_w, row_h, "Batterie", sBat, sBatExtra);
 
-      // Dritte Zeile
-      int row3_y = row2_y + card_h + gap_y;
-      draw_card(margin_x, row3_y, card_w, card_h, "Warmwasser", sWarm);
-      draw_card(margin_x + (card_w + gap_x), row3_y, 2 * card_w + gap_x, card_h, sBatteryTitle, sBat, sBatFooter);
+      draw_section(20,  row2_y, col_w, row_h, "Netz", sGrid, sGridStatus);
+      draw_section(280, row2_y, col_w, row_h, "Heizstab", sHeat, sHeatExtra);
+      draw_section(540, row2_y, col_w, row_h, "EQA Ladung", sEQA);
+
+      draw_section(20, row3_y, col_w, row_h, "Warmwasser oben", sWW);
+      draw_section(280, row3_y, col_w, row_h, "Bezug", sBezug);
+      draw_section(540, row3_y, col_w, row_h, "Einspeisung", sEins);
+
+      it.printf(50, row3_y + row_h + 30, id(smallFont), "Batterie-SOC");
 
       // --- SOC-Balken (unterhalb, mit 10%-Ticks) ---
-      const int bar_x = margin_x;
-      const int bar_y = row3_y + card_h + gap_y;
-      const int bar_w = 760;
+      const int bar_x = 50;
+      const int bar_y = row3_y + row_h + 50;     // innerhalb 480 px Höhe bleiben
+      const int bar_w = 700;
       const int bar_h = 20;
-
-      it.printf(bar_x, bar_y - 30, id(detailFont), "SOC Verlauf");
 
       // Rahmen
       it.rectangle(bar_x, bar_y, bar_w, bar_h);
@@ -235,7 +295,5 @@ display:
       // Ticks (unterhalb des Balkens, kurze Linien)
       for (int i = 0; i <= 10; i++) {
         int tx = bar_x + (bar_w * i) / 10;
-        it.line(tx, bar_y + bar_h + 2, tx, bar_y + bar_h + 10);
-        it.printf(tx, bar_y + bar_h + 14, id(titleFont), TextAlign::CENTER, "%d", i * 10);
+        it.line(tx, bar_y + bar_h + 2, tx, bar_y + bar_h + 8);
       }
-
