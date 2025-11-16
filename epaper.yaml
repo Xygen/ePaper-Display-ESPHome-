@@ -1,12 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.22
+#  Version: 1.23
 #  Änderungen:
-#    - Im Verbraucherbereich werden die Labels (Haus, Heizstab, EQA,
-#      Batterie, Einspeisung) um ihren Anteil an der Gesamt-
-#      Verbraucherleistung ergänzt, z.B. "Haus 40%".
-#      Warmwasser wird NICHT in der Prozentberechnung betrachtet und
-#      bleibt ohne Prozentangabe.
+#    - Zufluss-Labels (Solar / Netzbezug / Batterie inkl. Prozent)
+#      verwenden jetzt tinyFont und werden mit tiny_text_width
+#      zentriert.
 # --------------------------------------------------------------------
 
 esphome:
@@ -235,7 +233,7 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // myFont
+      const int cw_big   = 18;  // myFont (für Verbraucher-Labels)
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netzbezug / Batterie)
@@ -274,11 +272,14 @@ display:
                                bool draw_extra,
                                const std::string &extra_text) {
           int cx = idx * seg_w + seg_w / 2;
-          int lbl_px = strlen(label) * cw_big;
-          int val_px = strlen(value) * cw_big;
 
-          it.printf(cx - lbl_px/2, yLabel, id(myFont),  "%s", label);
-          it.printf(cx - val_px/2, yPower, id(myFont),  "%s", value);
+          // Label jetzt in tinyFont + echte Breite via LUT
+          std::string lbl_str(label);
+          int lbl_px = tiny_text_width(lbl_str);
+          int val_px = strlen(value) * cw_big;  // Watt-Zeile bleibt myFont
+
+          it.printf(cx - lbl_px/2, yLabel, id(tinyFont), "%s", label);
+          it.printf(cx - val_px/2, yPower, id(myFont),   "%s", value);
 
           if (draw_extra && !extra_text.empty()) {
             int extra_px = tiny_text_width(extra_text);
@@ -307,8 +308,8 @@ display:
         bat_today_str = buf;
 
         // Labels inkl. Anteil
-        char lblSolar[32]    = "Solar";
-        char lblBezug[32]    = "Netzbezug";
+        char lblSolar[32]     = "Solar";
+        char lblBezug[32]     = "Netzbezug";
         char lblBatterieIn[32]= "Batterie";
 
         if (totalIn > 0) {
