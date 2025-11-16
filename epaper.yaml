@@ -1,11 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.7
+#  Version: 1.13
 #  Änderungen:
-#    - Warmwasser wieder eingeblendet (Label "Warmwasser", Einheit °C)
-#    - Drei-Spalten-Verbrauchsblock erweitert um Warmwasser
-#    - Vollständige Zentrierungs- und Aufrücklogik übernommen
-#    - Rest: identisch zu v1.6
+#    - EQA wird nun ebenfalls vom Hausverbrauch abgezogen.
+#      Bisher: Haus = SysLoadPwr – Heizstab
+#      Neu:    Haus = SysLoadPwr – Heizstab – EQA
 # --------------------------------------------------------------------
 
 esphome:
@@ -133,14 +132,25 @@ display:
       int vBatMinus = (vBat < 0) ? -vBat : 0;
       int vBatPlus  = (vBat > 0) ?  vBat : 0;
 
-      vHaus = vHaus - vHeat;
+      // ---- Hausverbrauch berechnen ----
+      // neu in Version 1.13:
+      vHaus = vHaus - vHeat - vEQA;
 
+      // Netzwerte
       int vBezug       = (vGrid > 0) ? vGrid : 0;
       int vEinspeisung = (vGrid < 0) ? abs(vGrid) : 0;
 
+      // Prozentwerte
       int pv_pct   = clamp((int) lroundf((vPV   / 12600.0f) * 100.0f));
       int heat_pct = clamp((int) lroundf((vHeat /  9000.0f) * 100.0f));
-      int grid_pct = (vGrid < 0) ? clamp((int) lroundf((abs(vGrid) / 7560.0f) * 100.0f)) : 0;
+      int grid_pct = (vGrid < 0)
+                     ? clamp((int) lroundf((abs(vGrid) / 7560.0f) * 100.0f))
+                     : 0;
+
+      // Batterie-Lade-Prozent (100 % = 5090 W)
+      int batplus_pct = (vBatPlus > 0)
+                        ? clamp((int) lroundf((vBatPlus / 5090.0f) * 100.0f))
+                        : 0;
 
       // ---- Formatstrings ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
@@ -158,28 +168,30 @@ display:
       const int screen_w = 800;
       const int cw       = 18;
 
-      // ---- Zentrierte Blockfunktionen ----
+      // ---- Zufluss-Block ----
       auto draw_block3 = [&](int yLabel, int yValue,
-                             const char *label1, const char *value1, bool show1,
-                             const char *label2, const char *value2, bool show2,
-                             const char *label3, const char *value3, bool show3) {
-        int count = (show1?1:0) + (show2?1:0) + (show3?1:0);
+                             const char *l1, const char *v1, bool s1,
+                             const char *l2, const char *v2, bool s2,
+                             const char *l3, const char *v3, bool s3) {
+        int count = (s1?1:0)+(s2?1:0)+(s3?1:0);
         if (count == 0) return;
         int seg_w = screen_w / count;
         int idx = 0;
 
-        auto draw_one = [&](const char *lbl, const char *val){
-          int sx = idx * seg_w + seg_w/2;
-          it.printf(sx - strlen(lbl)*cw/2, yLabel, id(myFont), "%s", lbl);
-          it.printf(sx - strlen(val)*cw/2, yValue, id(myFont), "%s", val);
+        auto draw_one = [&](const char* lbl, const char* val, bool show){
+          if (!show) return;
+          int cx = idx*seg_w + seg_w/2;
+          it.printf(cx - strlen(lbl)*cw/2, yLabel, id(myFont), "%s", lbl);
+          it.printf(cx - strlen(val)*cw/2, yValue, id(myFont), "%s", val);
           idx++;
         };
-        if (show1) draw_one(label1, value1);
-        if (show2) draw_one(label2, value2);
-        if (show3) draw_one(label3, value3);
+
+        draw_one(l1,v1,s1);
+        draw_one(l2,v2,s2);
+        draw_one(l3,v3,s3);
       };
 
-      // ---- Zufluss (oben) ----
+      // Zufluss anzeigen
       char pv_full[32], bez_full[32], bat_full[32];
       sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
       sprintf(bez_full, "%s",        sBezug);
@@ -187,82 +199,127 @@ display:
 
       draw_block3(
         20, 60,
-        "Solar",     pv_full,  (vPV       != 0),
-        "Netzbezug", bez_full, (vBezug    != 0),
+        "Solar",     pv_full,  (vPV != 0),
+        "Netzbezug", bez_full, (vBezug != 0),
         "Batterie",  bat_full, (vBatMinus != 0)
       );
 
       // Trenner
-      it.filled_rectangle(10, 130, 780, 5);
+      it.filled_rectangle(10,130,780,5);
 
-      // ---- Verbraucherblock 1 ----
-      char h_full[32], heat_full[32], eqa_full[32];
-      sprintf(h_full, "%s", sHaus);
+      // -------------------------------
+      // Dynamische Verbraucher – wie v1.12
+      // -------------------------------
+
+      char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
+      sprintf(h_full,    "%s", sHaus);
       sprintf(heat_full, "%s (%d%%)", sHeat, heat_pct);
-      sprintf(eqa_full, "%s", sEQA);
+      sprintf(eqa_full,  "%s", sEQA);
+      sprintf(ww_full,   "%d °C", vWW);
 
-      draw_block3(
-        160, 200,
-        "Haus",     h_full,    (vHaus != 0),
-        "Heizstab", heat_full, (vHeat != 0),
-        "EQA",      eqa_full,  (vEQA  != 0)
-      );
+      char batp_full[32], eins_full[32];
 
-      // ---- Verbraucherblock 2: jetzt mit Warmwasser ----
-      char batp_full[32], eins_full[32], ww_full[32];
-      sprintf(batp_full, "%s", sBatPlusStr);
-      sprintf(ww_full, "%d °C", vWW);
+      if (vBatPlus > 0)
+        sprintf(batp_full, "%s (%d%%)", sBatPlusStr, batplus_pct);
+      else
+        sprintf(batp_full, "%s", sBatPlusStr);
 
       if (vEinspeisung > 0)
         sprintf(eins_full, "%s (%d%%)", sEins, grid_pct);
       else
         sprintf(eins_full, "%s", sEins);
 
-      draw_block3(
-        250, 290,
-        "Batterie (laden)", batp_full, (vBatPlus     != 0),
-        "Einspeisung",      eins_full, (vEinspeisung > 0),
-        "Warmwasser",       ww_full,   true
-      );
+      struct Item {
+        const char* label;
+        const char* value;
+        bool show;
+      };
 
-      // ---- SOC-Bereich ----
-      const int bx = 50;
-      const int by = 440;
-      const int bw = 700;
-      const int bh = 20;
+      Item items[6] = {
+        { "Haus",      h_full,    (vHaus != 0) },
+        { "Heizstab",  heat_full, (vHeat != 0) },
+        { "EQA",       eqa_full,  (vEQA  != 0) },
+        { "Warmwasser",ww_full,   true        },
+        { "Batterie",  batp_full, (vBatPlus     != 0) },
+        { "Einspeisung",eins_full,(vEinspeisung > 0) }
+      };
+
+      // Sichtbare Einträge sammeln
+      int vis_idx[6];
+      int n_vis = 0;
+      for (int i=0;i<6;i++){
+        if (items[i].show) vis_idx[n_vis++] = i;
+      }
+
+      if (n_vis > 0) {
+        int row1=0, row2=0;
+        switch(n_vis){
+          case 1: row1=1; row2=0; break;
+          case 2: row1=2; row2=0; break;
+          case 3: row1=2; row2=1; break;
+          case 4: row1=2; row2=2; break;
+          case 5: row1=3; row2=2; break;
+          default: row1=3; row2=n_vis-3; break;
+        }
+
+        auto draw_row = [&](int start, int count, int yL, int yV){
+          if (count<=0) return;
+          int seg_w = screen_w / count;
+          for (int k=0;k<count;k++){
+            Item &it_item = items[vis_idx[start+k]];
+            int cx = k*seg_w + seg_w/2;
+            int lbl_px = strlen(it_item.label)*cw;
+            int val_px = strlen(it_item.value)*cw;
+            it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
+            it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
+          }
+        };
+
+        draw_row(0, row1, 160, 200);
+        draw_row(row1, row2, 250, 290);
+      }
+
+      // -------------------------------
+      // SOC-Balken (identisch zu Version 1.12)
+      // -------------------------------
+      const int bx=50, by=440, bw=700, bh=20;
 
       char sSoc[64];
-
-      if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
+      if (!sZeit.empty() && sZeit!="unknown" && sZeit!="unavailable"){
         float h = strtof(sZeit.c_str(), nullptr);
-        if (h > 0 && h < 999) {
-          int hh = floor(h);
-          int mm = lround((h - hh)*60.0f);
-          if (mm >= 60) { mm -= 60; hh++; }
-          sprintf(sSoc, "Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
+        if (h>0 && h<999){
+          int hh = (int)floor(h);
+          int mm = (int)lround((h-hh)*60.0f);
+          if (mm>=60){ mm-=60; hh++; }
+          sprintf(sSoc,"Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
         } else {
-          sprintf(sSoc, "Batterie: %d%%", vSOC);
+          sprintf(sSoc,"Batterie: %d%%", vSOC);
         }
       } else {
-        sprintf(sSoc, "Batterie: %d%%", vSOC);
+        sprintf(sSoc,"Batterie: %d%%", vSOC);
       }
 
-      int soc_x = bx + bw/2 - strlen(sSoc) * cw / 2;
-      it.printf(soc_x, by - 40, id(tinyFont), "%s", sSoc);
+      int soc_x = bx + bw/2 - strlen(sSoc)*cw/2;
+      it.printf(soc_x, by-40, id(tinyFont), "%s", sSoc);
 
-      it.rectangle(bx, by, bw, bh);
+      // Rahmen
+      it.rectangle(bx,by,bw,bh);
 
-      int fw = bw * clamp(vSOC) / 100;
-      if (fw > 0) it.filled_rectangle(bx, by, fw, bh);
+      int fw = bw * clamp(vSOC)/100;
+      if (fw>0) it.filled_rectangle(bx,by,fw,bh);
 
-      for (int i = 0; i <= 10; i++) {
+      // Kleine Ticks nur 0–90 %
+      for (int i=0;i<=9;i++){
         int tx = bx + (bw*i)/10;
-        it.line(tx, by + bh + 2, tx, by + bh + 8);
+        it.line(tx, by+bh+2, tx, by+bh+8);
       }
 
-      int marks[5] = {0,25,50,75,100};
-      for (int i = 0; i < 5; i++) {
-        int tx = bx + (bw * marks[i]) / 100;
-        it.line(tx,     by + bh - 2, tx,     by + bh + 10);
-        it.line(tx + 1, by + bh - 2, tx + 1, by + bh + 10);
+      // Dicke Ticks bei 0/25/50/75/100
+      int marks[5]={0,25,50,75,100};
+      for (int i=0;i<5;i++){
+        int p = marks[i];
+        int tx = bx + (bw*p)/100;
+        if (p==100) tx -= 2;
+        it.line(tx,     by+bh-2, tx,     by+bh+10);
+        it.line(tx + 1, by+bh-2, tx + 1, by+bh+10);
       }
