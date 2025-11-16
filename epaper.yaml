@@ -1,13 +1,12 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.15
+#  Version: 1.17
 #  Änderungen:
-#    - Solar-Tagesertrag im Zuflussbereich angepasst:
-#      * "Heute:" entfällt.
-#      * Darstellung: "<kWh> kWh (<€> €)".
-#      * kWh = pv1_energy_today + pv2_energy_today.
-#      * € = kWh * input_number.strompreis.
-#      * Beide Werte mit zwei Nachkommastellen.
+#    - Zuflussbereich: Batterie bekommt analog zu Solar eine
+#      zusätzliche Zeile mit Tagesenergie und Geldwert:
+#        sensor.powerocean_battery_discharge_today
+#        + input_number.strompreis
+#      Darstellung: "<kWh> kWh (<€> €)" mit 2 Nachkommastellen.
 # --------------------------------------------------------------------
 
 esphome:
@@ -97,6 +96,10 @@ text_sensor:
     id: PV2EnergyToday
     internal: true
   - platform: homeassistant
+    entity_id: sensor.powerocean_battery_discharge_today
+    id: BatDischargeToday
+    internal: true
+  - platform: homeassistant
     entity_id: input_number.strompreis
     id: Strompreis
     internal: true
@@ -149,9 +152,10 @@ display:
       int   vSOC  = as_int(id(BatSOC).state);
       int   vEQA  = as_int(id(EQAPwr).state);
       int   vWW   = as_int(id(WarmWasser).state);
-      float vPV1Today = as_float(id(PV1EnergyToday).state);
-      float vPV2Today = as_float(id(PV2EnergyToday).state);
-      float vPrice    = as_float(id(Strompreis).state);
+      float vPV1Today   = as_float(id(PV1EnergyToday).state);
+      float vPV2Today   = as_float(id(PV2EnergyToday).state);
+      float vBatDisToday= as_float(id(BatDischargeToday).state);
+      float vPrice      = as_float(id(Strompreis).state);
       std::string sZeit = id(ZeitBisVoll).state;
 
       int vBatMinus = (vBat < 0) ? -vBat : 0;
@@ -180,6 +184,10 @@ display:
       float pv_today = vPV1Today + vPV2Today;
       float pv_value = pv_today * vPrice;
 
+      // Tages-Entladung Batterie (kWh) + Geldwert €
+      float bat_today = vBatDisToday;
+      float bat_value = bat_today * vPrice;
+
       // ---- Formatstrings ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
            sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20];
@@ -194,11 +202,11 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw       = 18;
+      const int cw_big   = 18;  // myFont
+      const int cw_small = 14;  // tinyFont
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netzbezug / Batterie)
-      // mit Solar-Tagesertrag + Geldwert in kleiner Schrift
       // ----------------------------------------------------
       bool showSolar = (vPV       != 0);
       bool showBezug = (vBezug    != 0);
@@ -211,21 +219,21 @@ display:
 
         const int yLabel  = 10;
         const int yPower  = 45;
-        const int yExtra  = 80;   // Solar Tagesertrag + €
+        const int yExtra  = 80;   // dritte Zeile (Energie/Geld)
 
         auto draw_inflow = [&](const char* label,
                                const char* value,
                                bool draw_extra,
                                const char* extra_text) {
           int cx = idx * seg_w + seg_w / 2;
-          int lbl_px = strlen(label) * cw;
-          int val_px = strlen(value) * cw;
+          int lbl_px = strlen(label) * cw_big;
+          int val_px = strlen(value) * cw_big;
 
           it.printf(cx - lbl_px/2, yLabel, id(myFont),  "%s", label);
           it.printf(cx - val_px/2, yPower, id(myFont),  "%s", value);
 
           if (draw_extra && extra_text != nullptr) {
-            int extra_px = strlen(extra_text) * cw;
+            int extra_px = strlen(extra_text) * cw_small;
             it.printf(cx - extra_px/2, yExtra, id(tinyFont), "%s", extra_text);
           }
 
@@ -233,11 +241,15 @@ display:
         };
 
         // Strings vorbereiten
-        char pv_full[32], bez_full[32], bat_full[32], pv_today_str[40];
+        char pv_full[32], bez_full[32], bat_full[32];
+        char pv_today_str[40], bat_today_str[40];
+
         sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
         sprintf(bez_full, "%s",        sBezug);
         sprintf(bat_full, "%s",        sBatMinusStr);
-        sprintf(pv_today_str, "%.2f kWh (%.2f €)", pv_today, pv_value);
+
+        sprintf(pv_today_str,  "%.2f kWh (%.2f €)", pv_today,  pv_value);
+        sprintf(bat_today_str, "%.2f kWh (%.2f €)", bat_today, bat_value);
 
         if (showSolar) {
           draw_inflow("Solar", pv_full, true, pv_today_str);
@@ -246,7 +258,7 @@ display:
           draw_inflow("Netzbezug", bez_full, false, nullptr);
         }
         if (showBatIn) {
-          draw_inflow("Batterie", bat_full, false, nullptr);
+          draw_inflow("Batterie", bat_full, true, bat_today_str);
         }
       }
 
@@ -312,8 +324,8 @@ display:
           for (int k=0;k<count;k++){
             Item &it_item = items[vis_idx[start+k]];
             int cx = k*seg_w + seg_w/2;
-            int lbl_px = strlen(it_item.label)*cw;
-            int val_px = strlen(it_item.value)*cw;
+            int lbl_px = strlen(it_item.label)*cw_big;
+            int val_px = strlen(it_item.value)*cw_big;
             it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
             it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
           }
@@ -343,7 +355,7 @@ display:
         sprintf(sSoc,"Batterie: %d%%", vSOC);
       }
 
-      int soc_x = bx + bw/2 - strlen(sSoc)*cw/2;
+      int soc_x = bx + bw/2 - strlen(sSoc)*cw_small/2;
       it.printf(soc_x, by-40, id(tinyFont), "%s", sSoc);
 
       it.rectangle(bx,by,bw,bh);
