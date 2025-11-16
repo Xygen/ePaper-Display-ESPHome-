@@ -1,10 +1,13 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.13
+#  Version: 1.15
 #  Änderungen:
-#    - EQA wird nun ebenfalls vom Hausverbrauch abgezogen.
-#      Bisher: Haus = SysLoadPwr – Heizstab
-#      Neu:    Haus = SysLoadPwr – Heizstab – EQA
+#    - Solar-Tagesertrag im Zuflussbereich angepasst:
+#      * "Heute:" entfällt.
+#      * Darstellung: "<kWh> kWh (<€> €)".
+#      * kWh = pv1_energy_today + pv2_energy_today.
+#      * € = kWh * input_number.strompreis.
+#      * Beide Werte mit zwei Nachkommastellen.
 # --------------------------------------------------------------------
 
 esphome:
@@ -85,6 +88,18 @@ text_sensor:
     entity_id: sensor.powerocean_zeit_bis_batterie_voll
     id: ZeitBisVoll
     internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_pv1_energy_today
+    id: PV1EnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_pv2_energy_today
+    id: PV2EnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: input_number.strompreis
+    id: Strompreis
+    internal: true
 
 spi:
   clk_pin: GPIO8
@@ -109,6 +124,13 @@ display:
         return (int) lroundf(strtof(s.c_str(), nullptr));
       };
 
+      auto as_float = [](const std::string &s) -> float {
+        if (s.empty() || s == "unavailable" || s == "unknown" ||
+            s == "None" || s == "none" || s == "nan" || s == "NaN")
+          return 0.0f;
+        return strtof(s.c_str(), nullptr);
+      };
+
       auto fmt_power = [](char *buf, int value) {
         if (abs(value) >= 1000)
           sprintf(buf, "%.2f kW", value / 1000.0f);
@@ -119,21 +141,23 @@ display:
       auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
 
       // ---- Werte laden ----
-      int vHaus = as_int(id(SysLoadPwr).state);
-      int vPV   = as_int(id(PVPwr).state);
-      int vGrid = as_int(id(SysGridPwr).state);
-      int vHeat = as_int(id(HeatPwr).state);
-      int vBat  = as_int(id(BatPwr).state);
-      int vSOC  = as_int(id(BatSOC).state);
-      int vEQA  = as_int(id(EQAPwr).state);
-      int vWW   = as_int(id(WarmWasser).state);
+      int   vHaus = as_int(id(SysLoadPwr).state);
+      int   vPV   = as_int(id(PVPwr).state);
+      int   vGrid = as_int(id(SysGridPwr).state);
+      int   vHeat = as_int(id(HeatPwr).state);
+      int   vBat  = as_int(id(BatPwr).state);
+      int   vSOC  = as_int(id(BatSOC).state);
+      int   vEQA  = as_int(id(EQAPwr).state);
+      int   vWW   = as_int(id(WarmWasser).state);
+      float vPV1Today = as_float(id(PV1EnergyToday).state);
+      float vPV2Today = as_float(id(PV2EnergyToday).state);
+      float vPrice    = as_float(id(Strompreis).state);
       std::string sZeit = id(ZeitBisVoll).state;
 
       int vBatMinus = (vBat < 0) ? -vBat : 0;
       int vBatPlus  = (vBat > 0) ?  vBat : 0;
 
       // ---- Hausverbrauch berechnen ----
-      // neu in Version 1.13:
       vHaus = vHaus - vHeat - vEQA;
 
       // Netzwerte
@@ -152,6 +176,10 @@ display:
                         ? clamp((int) lroundf((vBatPlus / 5090.0f) * 100.0f))
                         : 0;
 
+      // Tagesertrag PV (kWh) + Geldwert €
+      float pv_today = vPV1Today + vPV2Today;
+      float pv_value = pv_today * vPrice;
+
       // ---- Formatstrings ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
            sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20];
@@ -168,49 +196,66 @@ display:
       const int screen_w = 800;
       const int cw       = 18;
 
-      // ---- Zufluss-Block ----
-      auto draw_block3 = [&](int yLabel, int yValue,
-                             const char *l1, const char *v1, bool s1,
-                             const char *l2, const char *v2, bool s2,
-                             const char *l3, const char *v3, bool s3) {
-        int count = (s1?1:0)+(s2?1:0)+(s3?1:0);
-        if (count == 0) return;
-        int seg_w = screen_w / count;
-        int idx = 0;
+      // ----------------------------------------------------
+      // ZUFLUSS-BEREICH (Solar / Netzbezug / Batterie)
+      // mit Solar-Tagesertrag + Geldwert in kleiner Schrift
+      // ----------------------------------------------------
+      bool showSolar = (vPV       != 0);
+      bool showBezug = (vBezug    != 0);
+      bool showBatIn = (vBatMinus != 0);
 
-        auto draw_one = [&](const char* lbl, const char* val, bool show){
-          if (!show) return;
-          int cx = idx*seg_w + seg_w/2;
-          it.printf(cx - strlen(lbl)*cw/2, yLabel, id(myFont), "%s", lbl);
-          it.printf(cx - strlen(val)*cw/2, yValue, id(myFont), "%s", val);
+      int inflow_count = (showSolar?1:0) + (showBezug?1:0) + (showBatIn?1:0);
+      if (inflow_count > 0) {
+        int seg_w = screen_w / inflow_count;
+        int idx   = 0;
+
+        const int yLabel  = 10;
+        const int yPower  = 45;
+        const int yExtra  = 80;   // Solar Tagesertrag + €
+
+        auto draw_inflow = [&](const char* label,
+                               const char* value,
+                               bool draw_extra,
+                               const char* extra_text) {
+          int cx = idx * seg_w + seg_w / 2;
+          int lbl_px = strlen(label) * cw;
+          int val_px = strlen(value) * cw;
+
+          it.printf(cx - lbl_px/2, yLabel, id(myFont),  "%s", label);
+          it.printf(cx - val_px/2, yPower, id(myFont),  "%s", value);
+
+          if (draw_extra && extra_text != nullptr) {
+            int extra_px = strlen(extra_text) * cw;
+            it.printf(cx - extra_px/2, yExtra, id(tinyFont), "%s", extra_text);
+          }
+
           idx++;
         };
 
-        draw_one(l1,v1,s1);
-        draw_one(l2,v2,s2);
-        draw_one(l3,v3,s3);
-      };
+        // Strings vorbereiten
+        char pv_full[32], bez_full[32], bat_full[32], pv_today_str[40];
+        sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
+        sprintf(bez_full, "%s",        sBezug);
+        sprintf(bat_full, "%s",        sBatMinusStr);
+        sprintf(pv_today_str, "%.2f kWh (%.2f €)", pv_today, pv_value);
 
-      // Zufluss anzeigen
-      char pv_full[32], bez_full[32], bat_full[32];
-      sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
-      sprintf(bez_full, "%s",        sBezug);
-      sprintf(bat_full, "%s",        sBatMinusStr);
-
-      draw_block3(
-        20, 60,
-        "Solar",     pv_full,  (vPV != 0),
-        "Netzbezug", bez_full, (vBezug != 0),
-        "Batterie",  bat_full, (vBatMinus != 0)
-      );
+        if (showSolar) {
+          draw_inflow("Solar", pv_full, true, pv_today_str);
+        }
+        if (showBezug) {
+          draw_inflow("Netzbezug", bez_full, false, nullptr);
+        }
+        if (showBatIn) {
+          draw_inflow("Batterie", bat_full, false, nullptr);
+        }
+      }
 
       // Trenner
       it.filled_rectangle(10,130,780,5);
 
-      // -------------------------------
-      // Dynamische Verbraucher – wie v1.12
-      // -------------------------------
-
+      // ----------------------------------------------------
+      // VERBRAUCHER – dynamische 2-Zeilen-Verteilung
+      // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
       sprintf(heat_full, "%s (%d%%)", sHeat, heat_pct);
@@ -244,7 +289,6 @@ display:
         { "Einspeisung",eins_full,(vEinspeisung > 0) }
       };
 
-      // Sichtbare Einträge sammeln
       int vis_idx[6];
       int n_vis = 0;
       for (int i=0;i<6;i++){
@@ -279,9 +323,9 @@ display:
         draw_row(row1, row2, 250, 290);
       }
 
-      // -------------------------------
-      // SOC-Balken (identisch zu Version 1.12)
-      // -------------------------------
+      // ----------------------------------------------------
+      // SOC-BALKEN
+      // ----------------------------------------------------
       const int bx=50, by=440, bw=700, bh=20;
 
       char sSoc[64];
@@ -302,7 +346,6 @@ display:
       int soc_x = bx + bw/2 - strlen(sSoc)*cw/2;
       it.printf(soc_x, by-40, id(tinyFont), "%s", sSoc);
 
-      // Rahmen
       it.rectangle(bx,by,bw,bh);
 
       int fw = bw * clamp(vSOC)/100;
@@ -314,7 +357,7 @@ display:
         it.line(tx, by+bh+2, tx, by+bh+8);
       }
 
-      // Dicke Ticks bei 0/25/50/75/100
+      // Dicke Ticks bei 0/25/50/75/100 (100% -2 px)
       int marks[5]={0,25,50,75,100};
       for (int i=0;i<5;i++){
         int p = marks[i];
