@@ -1,10 +1,12 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.20
+#  Version: 1.22
 #  Änderungen:
-#    - Warnung behoben: case '€' aus tiny_char_width entfernt
-#      (mehrbyte-Char in char-Switch). Alle nicht gemappten Zeichen
-#      – inkl. € – laufen jetzt über die Default-Breite.
+#    - Im Verbraucherbereich werden die Labels (Haus, Heizstab, EQA,
+#      Batterie, Einspeisung) um ihren Anteil an der Gesamt-
+#      Verbraucherleistung ergänzt, z.B. "Haus 40%".
+#      Warmwasser wird NICHT in der Prozentberechnung betrachtet und
+#      bleibt ohne Prozentangabe.
 # --------------------------------------------------------------------
 
 esphome:
@@ -219,7 +221,7 @@ display:
       float grid_today = vGridToday;
       float grid_value = grid_today * vPrice;
 
-      // ---- Formatstrings ----
+      // ---- Formatstrings für Leistungen ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
            sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20];
 
@@ -241,6 +243,22 @@ display:
       bool showSolar = (vPV       != 0);
       bool showBezug = (vBezug    != 0);
       bool showBatIn = (vBatMinus != 0);
+
+      // Anteile an der Gesamtzuflussleistung berechnen
+      int pSolar = (vPV > 0) ? vPV : 0;
+      int pBezug = vBezug;
+      int pBatIn = vBatMinus;
+      int totalIn = pSolar + pBezug + pBatIn;
+
+      int shareSolar = 0;
+      int shareBezug = 0;
+      int shareBatIn = 0;
+
+      if (totalIn > 0) {
+        shareSolar = (int) lroundf(pSolar * 100.0f / totalIn);
+        shareBezug = (int) lroundf(pBezug * 100.0f / totalIn);
+        shareBatIn = (int) lroundf(pBatIn * 100.0f / totalIn);
+      }
 
       int inflow_count = (showSolar?1:0) + (showBezug?1:0) + (showBatIn?1:0);
       if (inflow_count > 0) {
@@ -288,14 +306,28 @@ display:
         sprintf(buf, "%.2f kWh (%.2f €)", bat_today,  bat_value);
         bat_today_str = buf;
 
+        // Labels inkl. Anteil
+        char lblSolar[32]    = "Solar";
+        char lblBezug[32]    = "Netzbezug";
+        char lblBatterieIn[32]= "Batterie";
+
+        if (totalIn > 0) {
+          if (shareSolar > 0)
+            sprintf(lblSolar, "Solar %d%%", shareSolar);
+          if (shareBezug > 0)
+            sprintf(lblBezug, "Netzbezug %d%%", shareBezug);
+          if (shareBatIn > 0)
+            sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
+        }
+
         if (showSolar) {
-          draw_inflow("Solar", pv_full, true, pv_today_str);
+          draw_inflow(lblSolar, pv_full, true, pv_today_str);
         }
         if (showBezug) {
-          draw_inflow("Netzbezug", bez_full, true, bez_today_str);
+          draw_inflow(lblBezug, bez_full, true, bez_today_str);
         }
         if (showBatIn) {
-          draw_inflow("Batterie", bat_full, true, bat_today_str);
+          draw_inflow(lblBatterieIn, bat_full, true, bat_today_str);
         }
       }
 
@@ -323,6 +355,46 @@ display:
       else
         sprintf(eins_full, "%s", sEins);
 
+      // Verbraucher-Anteile (ohne Warmwasser)
+      int pHausC = (vHaus      > 0) ? vHaus      : 0;
+      int pHeatC = (vHeat      > 0) ? vHeat      : 0;
+      int pEQAC  = (vEQA       > 0) ? vEQA       : 0;
+      int pBatC  = (vBatPlus   > 0) ? vBatPlus   : 0;
+      int pEinsC = (vEinspeisung > 0) ? vEinspeisung : 0;
+
+      int totalCons = pHausC + pHeatC + pEQAC + pBatC + pEinsC;
+
+      int shareHaus = 0, shareHeat = 0, shareEQA = 0, shareBatC = 0, shareEins = 0;
+      if (totalCons > 0) {
+        shareHaus = (int) lroundf(pHausC * 100.0f / totalCons);
+        shareHeat = (int) lroundf(pHeatC * 100.0f / totalCons);
+        shareEQA  = (int) lroundf(pEQAC  * 100.0f / totalCons);
+        shareBatC = (int) lroundf(pBatC  * 100.0f / totalCons);
+        shareEins = (int) lroundf(pEinsC * 100.0f / totalCons);
+      }
+
+      // Labels für Verbraucher (mit Prozent, außer Warmwasser)
+      char lblHaus[32]       = "Haus";
+      char lblHeiz[32]       = "Heizstab";
+      char lblEQA[32]        = "EQA";
+      char lblWW[32]         = "Warmwasser";
+      char lblBatVerbr[32]   = "Batterie";
+      char lblEinspeisung[32]= "Einspeisung";
+
+      if (totalCons > 0) {
+        if (shareHaus > 0)
+          sprintf(lblHaus, "Haus %d%%", shareHaus);
+        if (shareHeat > 0)
+          sprintf(lblHeiz, "Heizstab %d%%", shareHeat);
+        if (shareEQA > 0)
+          sprintf(lblEQA, "EQA %d%%", shareEQA);
+        if (shareBatC > 0)
+          sprintf(lblBatVerbr, "Batterie %d%%", shareBatC);
+        if (shareEins > 0)
+          sprintf(lblEinspeisung, "Einspeisung %d%%", shareEins);
+      }
+      // Warmwasser-Label bleibt ohne Prozent
+
       struct Item {
         const char* label;
         const char* value;
@@ -330,12 +402,12 @@ display:
       };
 
       Item items[6] = {
-        { "Haus",      h_full,    (vHaus != 0) },
-        { "Heizstab",  heat_full, (vHeat != 0) },
-        { "EQA",       eqa_full,  (vEQA  != 0) },
-        { "Warmwasser",ww_full,   true        },
-        { "Batterie",  batp_full, (vBatPlus     != 0) },
-        { "Einspeisung",eins_full,(vEinspeisung > 0) }
+        { lblHaus,        h_full,    (vHaus != 0) },
+        { lblHeiz,        heat_full, (vHeat != 0) },
+        { lblEQA,         eqa_full,  (vEQA  != 0) },
+        { lblWW,          ww_full,   true        },
+        { lblBatVerbr,    batp_full, (vBatPlus     != 0) },
+        { lblEinspeisung, eins_full, (vEinspeisung > 0) }
       };
 
       int vis_idx[6];
