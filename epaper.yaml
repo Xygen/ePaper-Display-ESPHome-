@@ -1,13 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.18
+#  Version: 1.20
 #  Änderungen:
-#    - Zuflussbereich: Netzbezug erhält eine zusätzliche Zeile mit
-#      Tagesenergie und Geldwert:
-#        sensor.iometer_gesamtbezug_today
-#        * input_number.strompreis
-#      Darstellung: "<kWh> kWh (<€> €)" mit 2 Nachkommastellen,
-#      analog zu Solar und Batterie.
+#    - Warnung behoben: case '€' aus tiny_char_width entfernt
+#      (mehrbyte-Char in char-Switch). Alle nicht gemappten Zeichen
+#      – inkl. € – laufen jetzt über die Default-Breite.
 # --------------------------------------------------------------------
 
 esphome:
@@ -148,6 +145,30 @@ display:
 
       auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
 
+      // --- Zeichenbreiten-LUT für tinyFont ----------------
+      auto tiny_char_width = [](char c) -> int {
+        switch (c) {
+          case '0': case '8': case '9': return 15;
+          case '1':                     return 11;
+          case '2': case '3': case '4':
+          case '5': case '6': case '7': return 14;
+          case 'k': case 'W': case 'h': return 14;
+          case '(': case ')':           return 10;
+          case '.': case ',':           return 7;
+          case ':':                     return 7;
+          case ' ':                     return 8;
+          default:                      return 14;  // Fallback (u.a. €)
+        }
+      };
+
+      auto tiny_text_width = [&](const std::string &s) -> int {
+        int sum = 0;
+        for (size_t i = 0; i < s.size(); i++) {
+          sum += tiny_char_width(s[i]);
+        }
+        return sum;
+      };
+
       // ---- Werte laden ----
       int   vHaus = as_int(id(SysLoadPwr).state);
       int   vPV   = as_int(id(PVPwr).state);
@@ -213,7 +234,6 @@ display:
 
       const int screen_w = 800;
       const int cw_big   = 18;  // myFont
-      const int cw_small = 14;  // tinyFont
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netzbezug / Batterie)
@@ -234,7 +254,7 @@ display:
         auto draw_inflow = [&](const char* label,
                                const char* value,
                                bool draw_extra,
-                               const char* extra_text) {
+                               const std::string &extra_text) {
           int cx = idx * seg_w + seg_w / 2;
           int lbl_px = strlen(label) * cw_big;
           int val_px = strlen(value) * cw_big;
@@ -242,9 +262,9 @@ display:
           it.printf(cx - lbl_px/2, yLabel, id(myFont),  "%s", label);
           it.printf(cx - val_px/2, yPower, id(myFont),  "%s", value);
 
-          if (draw_extra && extra_text != nullptr) {
-            int extra_px = strlen(extra_text) * cw_small;
-            it.printf(cx - extra_px/2, yExtra, id(tinyFont), "%s", extra_text);
+          if (draw_extra && !extra_text.empty()) {
+            int extra_px = tiny_text_width(extra_text);
+            it.printf(cx - extra_px/2, yExtra, id(tinyFont), "%s", extra_text.c_str());
           }
 
           idx++;
@@ -252,15 +272,21 @@ display:
 
         // Strings vorbereiten
         char pv_full[32], bez_full[32], bat_full[32];
-        char pv_today_str[40], bez_today_str[40], bat_today_str[40];
-
         sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
         sprintf(bez_full, "%s",        sBezug);
         sprintf(bat_full, "%s",        sBatMinusStr);
 
-        sprintf(pv_today_str,  "%.2f kWh (%.2f €)", pv_today,   pv_value);
-        sprintf(bez_today_str, "%.2f kWh (%.2f €)", grid_today, grid_value);
-        sprintf(bat_today_str, "%.2f kWh (%.2f €)", bat_today,  bat_value);
+        char buf[40];
+        std::string pv_today_str;
+        std::string bez_today_str;
+        std::string bat_today_str;
+
+        sprintf(buf, "%.2f kWh (%.2f €)", pv_today,   pv_value);
+        pv_today_str = buf;
+        sprintf(buf, "%.2f kWh (%.2f €)", grid_today, grid_value);
+        bez_today_str = buf;
+        sprintf(buf, "%.2f kWh (%.2f €)", bat_today,  bat_value);
+        bat_today_str = buf;
 
         if (showSolar) {
           draw_inflow("Solar", pv_full, true, pv_today_str);
@@ -366,7 +392,9 @@ display:
         sprintf(sSoc,"Batterie: %d%%", vSOC);
       }
 
-      int soc_x = bx + bw/2 - strlen(sSoc)*cw_small/2;
+      std::string soc_str = sSoc;
+      int soc_px = tiny_text_width(soc_str);
+      int soc_x  = bx + bw/2 - soc_px/2;
       it.printf(soc_x, by-40, id(tinyFont), "%s", sSoc);
 
       it.rectangle(bx,by,bw,bh);
