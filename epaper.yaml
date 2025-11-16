@@ -1,12 +1,13 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.17
+#  Version: 1.18
 #  Änderungen:
-#    - Zuflussbereich: Batterie bekommt analog zu Solar eine
-#      zusätzliche Zeile mit Tagesenergie und Geldwert:
-#        sensor.powerocean_battery_discharge_today
-#        + input_number.strompreis
-#      Darstellung: "<kWh> kWh (<€> €)" mit 2 Nachkommastellen.
+#    - Zuflussbereich: Netzbezug erhält eine zusätzliche Zeile mit
+#      Tagesenergie und Geldwert:
+#        sensor.iometer_gesamtbezug_today
+#        * input_number.strompreis
+#      Darstellung: "<kWh> kWh (<€> €)" mit 2 Nachkommastellen,
+#      analog zu Solar und Batterie.
 # --------------------------------------------------------------------
 
 esphome:
@@ -100,6 +101,10 @@ text_sensor:
     id: BatDischargeToday
     internal: true
   - platform: homeassistant
+    entity_id: sensor.iometer_gesamtbezug_today
+    id: GridEnergyToday
+    internal: true
+  - platform: homeassistant
     entity_id: input_number.strompreis
     id: Strompreis
     internal: true
@@ -152,10 +157,13 @@ display:
       int   vSOC  = as_int(id(BatSOC).state);
       int   vEQA  = as_int(id(EQAPwr).state);
       int   vWW   = as_int(id(WarmWasser).state);
-      float vPV1Today   = as_float(id(PV1EnergyToday).state);
-      float vPV2Today   = as_float(id(PV2EnergyToday).state);
-      float vBatDisToday= as_float(id(BatDischargeToday).state);
-      float vPrice      = as_float(id(Strompreis).state);
+
+      float vPV1Today    = as_float(id(PV1EnergyToday).state);
+      float vPV2Today    = as_float(id(PV2EnergyToday).state);
+      float vBatDisToday = as_float(id(BatDischargeToday).state);
+      float vGridToday   = as_float(id(GridEnergyToday).state);
+      float vPrice       = as_float(id(Strompreis).state);
+
       std::string sZeit = id(ZeitBisVoll).state;
 
       int vBatMinus = (vBat < 0) ? -vBat : 0;
@@ -180,13 +188,15 @@ display:
                         ? clamp((int) lroundf((vBatPlus / 5090.0f) * 100.0f))
                         : 0;
 
-      // Tagesertrag PV (kWh) + Geldwert €
-      float pv_today = vPV1Today + vPV2Today;
-      float pv_value = pv_today * vPrice;
+      // Tageserträge + Werte
+      float pv_today   = vPV1Today + vPV2Today;
+      float pv_value   = pv_today   * vPrice;
 
-      // Tages-Entladung Batterie (kWh) + Geldwert €
-      float bat_today = vBatDisToday;
-      float bat_value = bat_today * vPrice;
+      float bat_today  = vBatDisToday;
+      float bat_value  = bat_today  * vPrice;
+
+      float grid_today = vGridToday;
+      float grid_value = grid_today * vPrice;
 
       // ---- Formatstrings ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
@@ -242,20 +252,21 @@ display:
 
         // Strings vorbereiten
         char pv_full[32], bez_full[32], bat_full[32];
-        char pv_today_str[40], bat_today_str[40];
+        char pv_today_str[40], bez_today_str[40], bat_today_str[40];
 
         sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
         sprintf(bez_full, "%s",        sBezug);
         sprintf(bat_full, "%s",        sBatMinusStr);
 
-        sprintf(pv_today_str,  "%.2f kWh (%.2f €)", pv_today,  pv_value);
-        sprintf(bat_today_str, "%.2f kWh (%.2f €)", bat_today, bat_value);
+        sprintf(pv_today_str,  "%.2f kWh (%.2f €)", pv_today,   pv_value);
+        sprintf(bez_today_str, "%.2f kWh (%.2f €)", grid_today, grid_value);
+        sprintf(bat_today_str, "%.2f kWh (%.2f €)", bat_today,  bat_value);
 
         if (showSolar) {
           draw_inflow("Solar", pv_full, true, pv_today_str);
         }
         if (showBezug) {
-          draw_inflow("Netzbezug", bez_full, false, nullptr);
+          draw_inflow("Netzbezug", bez_full, true, bez_today_str);
         }
         if (showBatIn) {
           draw_inflow("Batterie", bat_full, true, bat_today_str);
