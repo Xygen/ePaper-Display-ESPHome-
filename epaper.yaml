@@ -1,13 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.34
+#  Version: 1.35
 #  Änderungen:
-#    - Verbrauchsblock: dritte Zeile für Energie + Euro-Wert pro Element
-#    - Energie-Quelle:
-#         EQA:          sensor.shelly_plug_mercedes_eqa_250_energy_meter_today
-#         Einspeisung:  sensor.iometer_gesamteinspeisung_today
-#         Batterie:     sensor.powerocean_battery_discharge_today (wie oben)
-#    - Format Energie-Zeile: "<x.y> kWh (<yy.yy> €)"
+#    - Verbrauchsblock: automatisches Ausblenden deaktiviert
+#    - Aufrücklogik entfernt: immer 2 feste Reihen à 3 Elemente
+#      Oben: Haus, Heizstab, EQA
+#      Unten: Warmwasser, Batterie, Einspeisung
 # --------------------------------------------------------------------
 
 esphome:
@@ -237,12 +235,12 @@ display:
       int   vEQA  = as_int(id(EQAPwr).state);
       int   vWW   = as_int(id(WarmWasser).state);
 
-      float vPV1Today      = as_float(id(PV1EnergyToday).state);
-      float vPV2Today      = as_float(id(PV2EnergyToday).state);
-      float vBatDisToday   = as_float(id(BatDischargeToday).state);
-      float vGridToday     = as_float(id(GridEnergyToday).state);
-      float vPrice         = as_float(id(Strompreis).state);
-      float vEQAEnergyToday= as_float(id(EQAEnergyToday).state);
+      float vPV1Today        = as_float(id(PV1EnergyToday).state);
+      float vPV2Today        = as_float(id(PV2EnergyToday).state);
+      float vBatDisToday     = as_float(id(BatDischargeToday).state);
+      float vGridToday       = as_float(id(GridEnergyToday).state);
+      float vPrice           = as_float(id(Strompreis).state);
+      float vEQAEnergyToday  = as_float(id(EQAEnergyToday).state);
       float vEinsEnergyToday = as_float(id(EinsEnergyToday).state);
 
       std::string sZeit = id(ZeitBisVoll).state;
@@ -293,7 +291,7 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // myFont (für Verbraucher-Labels/Werte)
+      const int cw_big   = 18;  // myFont (Labels/Werte im Verbraucherblock)
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
@@ -356,7 +354,7 @@ display:
         sprintf(bez_full, "%s", sBezug);
         sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € in einer Zeile, mit 1 Nachkommastelle für kWh
+        // Energie + € (1 Nachkommastelle für kWh)
         char buf[48];
         std::string pv_today_str;
         std::string bez_today_str;
@@ -383,7 +381,7 @@ display:
             sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
         }
 
-        // Reihenfolge: Solar – Netz – Batterie (immer gezeichnet)
+        // Reihenfolge: Solar – Netz – Batterie
         idx = 0;
         draw_inflow(lblSolar,      pv_full,  pv_today_str);
         draw_inflow(lblBezug,      bez_full, bez_today_str);
@@ -394,7 +392,7 @@ display:
       it.filled_rectangle(10,130,780,5);
 
       // ----------------------------------------------------
-      // VERBRAUCHER – dynamische 2-Zeilen-Verteilung + Energie-Zeile
+      // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -479,61 +477,47 @@ display:
         const char* value;
         float energy_kwh;
         float value_eur;
-        bool show;
       };
 
+      // Feste Reihen:
+      // 0: Haus, 1: Heizstab, 2: EQA
+      // 3: Warmwasser, 4: Batterie, 5: Einspeisung
       Item items[6] = {
-        { lblHaus,        h_full,    haus_energy,  haus_value,  (vHaus != 0) },
-        { lblHeiz,        heat_full, heat_energy,  heat_value,  (vHeat != 0) },
-        { lblEQA,         eqa_full,  eqa_energy,   eqa_value,   (vEQA  != 0) },
-        { lblWW,          ww_full,   ww_energy,    ww_value,    true        },
-        { lblBatVerbr,    batp_full, batc_energy,  batc_value,  (vBatPlus     != 0) },
-        { lblEinspeisung, eins_full, eins_energy,  eins_value,  (vEinspeisung > 0) }
+        { lblHaus,        h_full,    haus_energy,  haus_value     },
+        { lblHeiz,        heat_full, heat_energy,  heat_value     },
+        { lblEQA,         eqa_full,  eqa_energy,   eqa_value      },
+        { lblWW,          ww_full,   ww_energy,    ww_value       },
+        { lblBatVerbr,    batp_full, batc_energy,  batc_value     },
+        { lblEinspeisung, eins_full, eins_energy,  eins_value     }
       };
 
-      int vis_idx[6];
-      int n_vis = 0;
-      for (int i = 0; i < 6; i++) {
-        if (items[i].show) vis_idx[n_vis++] = i;
-      }
+      auto draw_row_fixed = [&](int start_index, int count,
+                                int yL, int yV, int yE) {
+        int seg_w = screen_w / count;
+        for (int i = 0; i < count; i++) {
+          Item &it_item = items[start_index + i];
+          int cx = i * seg_w + seg_w / 2;
 
-      if (n_vis > 0) {
-        int row1=0, row2=0;
-        switch(n_vis){
-          case 1: row1=1; row2=0; break;
-          case 2: row1=2; row2=0; break;
-          case 3: row1=2; row2=1; break;
-          case 4: row1=2; row2=2; break;
-          case 5: row1=3; row2=2; break;
-          default: row1=3; row2=n_vis-3; break;
-        }
+          int lbl_px = strlen(it_item.label) * cw_big;
+          int val_px = strlen(it_item.value) * cw_big;
 
-        auto draw_row = [&](int start, int count, int yL, int yV, int yE){
-          if (count<=0) return;
-          int seg_w = screen_w / count;
-          for (int k=0;k<count;k++){
-            Item &it_item = items[vis_idx[start+k]];
-            int cx = k*seg_w + seg_w/2;
-            int lbl_px = strlen(it_item.label)*cw_big;
-            int val_px = strlen(it_item.value)*cw_big;
-            it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
-            it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
+          it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
+          it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
 
-            if (it_item.energy_kwh > 0.0f) {
-              char eb[48];
-              sprintf(eb, "%.1f kWh (%.2f €)", it_item.energy_kwh, it_item.value_eur);
-              std::string es = eb;
-              int e_px = tiny_text_width(es);
-              it.printf(cx - e_px/2, yE, id(tinyFont), "%s", es.c_str());
-            }
+          if (it_item.energy_kwh > 0.0f) {
+            char eb[48];
+            sprintf(eb, "%.1f kWh (%.2f €)", it_item.energy_kwh, it_item.value_eur);
+            std::string es = eb;
+            int e_px = tiny_text_width(es);
+            it.printf(cx - e_px/2, yE, id(tinyFont), "%s", es.c_str());
           }
-        };
+        }
+      };
 
-        // erste Verbraucher-Zeile
-        draw_row(0, row1, 160, 200, 230);
-        // zweite Verbraucher-Zeile
-        draw_row(row1, row2, 260, 300, 330);
-      }
+      // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
+      draw_row_fixed(0, 3, 160, 200, 230);
+      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung
+      draw_row_fixed(3, 3, 260, 300, 330);
 
       // ----------------------------------------------------
       // SOC-BALKEN
