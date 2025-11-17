@@ -1,9 +1,13 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.24
+#  Version: 1.27
 #  Änderungen:
-#    - Zufluss-Label "Netzbezug" in "Netz" umbenannt, inkl. Prozent-
-#      Anzeige (z.B. "Netz 25%").
+#    - Zufluss-Elemente (Solar, Netz, Batterie) werden immer angezeigt,
+#      auch bei 0 W.
+#    - Prozentanteile im Label (Solar/Netz/Batterie) nur, wenn mind. zwei
+#      dieser drei Zuflüsse Leistung > 0 W haben.
+#    - Bei Solar wird der Leistungs-Prozentwert (pv_pct) nur angezeigt,
+#      wenn vPV > 0 W. Bei 0 W kein "(0%)".
 # --------------------------------------------------------------------
 
 esphome:
@@ -235,16 +239,13 @@ display:
       const int cw_big   = 18;  // myFont (für Verbraucher-Labels)
 
       // ----------------------------------------------------
-      // ZUFLUSS-BEREICH (Solar / Netz / Batterie)
+      // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
       // ----------------------------------------------------
-      bool showSolar = (vPV       != 0);
-      bool showBezug = (vBezug    != 0);
-      bool showBatIn = (vBatMinus != 0);
-
-      // Anteile an der Gesamtzuflussleistung berechnen
+      // Beiträge für die Anteilsberechnung (nur >=0)
       int pSolar = (vPV > 0) ? vPV : 0;
-      int pBezug = vBezug;
-      int pBatIn = vBatMinus;
+      int pBezug = (vBezug > 0) ? vBezug : 0;
+      int pBatIn = (vBatMinus > 0) ? vBatMinus : 0;
+
       int totalIn = pSolar + pBezug + pBatIn;
 
       int shareSolar = 0;
@@ -257,14 +258,21 @@ display:
         shareBatIn = (int) lroundf(pBatIn * 100.0f / totalIn);
       }
 
-      int inflow_count = (showSolar?1:0) + (showBezug?1:0) + (showBatIn?1:0);
+      // Anzahl der Zuflüsse mit Leistung > 0 W
+      int active_inflow_count =
+          (pSolar > 0 ? 1 : 0) +
+          (pBezug > 0 ? 1 : 0) +
+          (pBatIn > 0 ? 1 : 0);
+
+      // Immer 3 Segmente: Solar, Netz, Batterie
+      int inflow_count = 3;
       if (inflow_count > 0) {
         int seg_w = screen_w / inflow_count;
         int idx   = 0;
 
         const int yLabel  = 10;
-        const int yPower  = 45;
-        const int yExtra  = 80;   // dritte Zeile (Energie/Geld)
+        const int yPower  = 40;  // leicht nach oben verschoben
+        const int yExtra  = 80;  // dritte Zeile (Energie/Geld)
 
         auto draw_inflow = [&](const char* label,
                                const char* value,
@@ -272,7 +280,6 @@ display:
                                const std::string &extra_text) {
           int cx = idx * seg_w + seg_w / 2;
 
-          // Label in tinyFont + echte Breite via LUT
           std::string lbl_str(label);
           int lbl_px = tiny_text_width(lbl_str);
           int val_px = strlen(value) * cw_big;  // Watt-Zeile bleibt myFont
@@ -290,7 +297,13 @@ display:
 
         // Strings vorbereiten
         char pv_full[32], bez_full[32], bat_full[32];
-        sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
+
+        // Für Solar: Effizienz-% nur, wenn vPV > 0
+        if (vPV > 0)
+          sprintf(pv_full, "%s (%d%%)", sPV, pv_pct);
+        else
+          sprintf(pv_full, "%s", sPV);
+
         sprintf(bez_full, "%s",        sBezug);
         sprintf(bat_full, "%s",        sBatMinusStr);
 
@@ -306,12 +319,13 @@ display:
         sprintf(buf, "%.2f kWh (%.2f €)", bat_today,  bat_value);
         bat_today_str = buf;
 
-        // Labels inkl. Anteil (Netz statt Netzbezug)
+        // Basis-Labels
         char lblSolar[32]      = "Solar";
         char lblBezug[32]      = "Netz";
         char lblBatterieIn[32] = "Batterie";
 
-        if (totalIn > 0) {
+        // Prozent nur, wenn mind. zwei Zuflüsse > 0 W haben
+        if (totalIn > 0 && active_inflow_count > 1) {
           if (shareSolar > 0)
             sprintf(lblSolar, "Solar %d%%", shareSolar);
           if (shareBezug > 0)
@@ -320,15 +334,11 @@ display:
             sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
         }
 
-        if (showSolar) {
-          draw_inflow(lblSolar, pv_full, true, pv_today_str);
-        }
-        if (showBezug) {
-          draw_inflow(lblBezug, bez_full, true, bez_today_str);
-        }
-        if (showBatIn) {
-          draw_inflow(lblBatterieIn, bat_full, true, bat_today_str);
-        }
+        // Reihenfolge: Solar, Netz, Batterie – immer gezeichnet
+        idx = 0;
+        draw_inflow(lblSolar,      pv_full,  true, pv_today_str);
+        draw_inflow(lblBezug,      bez_full, true, bez_today_str);
+        draw_inflow(lblBatterieIn, bat_full, true, bat_today_str);
       }
 
       // Trenner
@@ -373,6 +383,14 @@ display:
         shareEins = (int) lroundf(pEinsC * 100.0f / totalCons);
       }
 
+      // Anzahl der "echten" Verbraucher (ohne Warmwasser), die >0 sind
+      int consumer_count =
+          (pHausC  > 0 ? 1 : 0) +
+          (pHeatC  > 0 ? 1 : 0) +
+          (pEQAC   > 0 ? 1 : 0) +
+          (pBatC   > 0 ? 1 : 0) +
+          (pEinsC  > 0 ? 1 : 0);
+
       // Labels für Verbraucher (mit Prozent, außer Warmwasser)
       char lblHaus[32]       = "Haus";
       char lblHeiz[32]       = "Heizstab";
@@ -381,7 +399,8 @@ display:
       char lblBatVerbr[32]   = "Batterie";
       char lblEinspeisung[32]= "Einspeisung";
 
-      if (totalCons > 0) {
+      // Prozent nur, wenn mehr als ein echter Verbraucher angezeigt wird
+      if (totalCons > 0 && consumer_count > 1) {
         if (shareHaus > 0)
           sprintf(lblHaus, "Haus %d%%", shareHaus);
         if (shareHeat > 0)
