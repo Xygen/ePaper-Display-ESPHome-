@@ -1,10 +1,9 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.30
+#  Version: 1.31
 #  Änderungen:
-#    - Zufluss: Energie und Euro-Wert getrennt in 3. und 4. Zeile
-#    - Euro-Wert ohne Klammern (z.B. "1.67 €")
-#    - Trennerlinie auf y=140 verschoben, damit genug Platz ist
+#    - case '€' aus tiny_char_width entfernt (verursachte GCC-Warnung),
+#      Euro-Zeichen läuft nun über den Fallback (Breite 14).
 # --------------------------------------------------------------------
 
 esphome:
@@ -194,9 +193,8 @@ display:
           case '.': case ',': return 7;
           case ':':           return 7;
           case ' ':           return 8;
-          case '€':           return 14;
 
-          default: return 14; // Fallback
+          default: return 14; // Fallback (auch für '€')
         }
       };
 
@@ -272,7 +270,7 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // myFont (für Labels/Werte im Verbrauchsteil)
+      const int cw_big   = 18;  // myFont
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
@@ -295,7 +293,7 @@ display:
           (pBezug > 0 ? 1 : 0) +
           (pBatIn > 0 ? 1 : 0);
 
-      if (true) {
+      {
         int inflow_count = 3;
         int seg_w = screen_w / inflow_count;
         int idx   = 0;
@@ -469,7 +467,7 @@ display:
 
       int vis_idx[6];
       int n_vis = 0;
-      for (int i = 0; i < 6; i++) {
+      for (int i=0;i<6;i++){
         if (items[i].show) vis_idx[n_vis++] = i;
       }
 
