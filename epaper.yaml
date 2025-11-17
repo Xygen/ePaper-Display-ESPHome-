@@ -1,9 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.31
+#  Version: 1.32
 #  Änderungen:
-#    - case '€' aus tiny_char_width entfernt (verursachte GCC-Warnung),
-#      Euro-Zeichen läuft nun über den Fallback (Breite 14).
+#    - Basierend auf Version 1.28
+#    - Energiewerte im Zuflussblock (kWh) nun mit 1 Nachkommastelle
+#      (z.B. "6.5 kWh (1.67 €)")
 # --------------------------------------------------------------------
 
 esphome:
@@ -167,7 +168,7 @@ display:
           case 'M': case 'W':
             return 19;
 
-          // Kleinbuchstaben
+          // Kleinbuchstaben (z.B. solar, netz, batterie, haus, warmwasser, eqa)
           case 'a': case 'c': case 'e': case 'o':
             return 13;
           case 'b': case 'd': case 'g': case 'h':
@@ -188,7 +189,7 @@ display:
           case 'y': case 'z':
             return 12;
 
-          // Satzzeichen / Einheiten
+          // Einheiten & Satzzeichen
           case '(': case ')': return 10;
           case '.': case ',': return 7;
           case ':':           return 7;
@@ -270,101 +271,87 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // myFont
+      const int cw_big   = 18;  // myFont (für Verbraucher-Labels)
 
       // ----------------------------------------------------
-      // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
+      // ZUFLUSS-BEREICH (Solar / Netz / Batterie)
       // ----------------------------------------------------
-      int pSolar = (vPV       > 0) ? vPV       : 0;
-      int pBezug = (vBezug    > 0) ? vBezug    : 0;
-      int pBatIn = (vBatMinus > 0) ? vBatMinus : 0;
+      bool showSolar = (vPV       != 0);
+      bool showBezug = (vBezug    != 0);
+      bool showBatIn = (vBatMinus != 0);
 
+      // Anteile an der Gesamtzuflussleistung berechnen
+      int pSolar = (vPV > 0) ? vPV : 0;
+      int pBezug = vBezug;
+      int pBatIn = vBatMinus;
       int totalIn = pSolar + pBezug + pBatIn;
 
-      int shareSolar = 0, shareBezug = 0, shareBatIn = 0;
+      int shareSolar = 0;
+      int shareBezug = 0;
+      int shareBatIn = 0;
+
       if (totalIn > 0) {
         shareSolar = (int) lroundf(pSolar * 100.0f / totalIn);
         shareBezug = (int) lroundf(pBezug * 100.0f / totalIn);
         shareBatIn = (int) lroundf(pBatIn * 100.0f / totalIn);
       }
 
-      int active_inflow_count =
-          (pSolar > 0 ? 1 : 0) +
-          (pBezug > 0 ? 1 : 0) +
-          (pBatIn > 0 ? 1 : 0);
-
-      {
-        int inflow_count = 3;
+      int inflow_count = (showSolar?1:0) + (showBezug?1:0) + (showBatIn?1:0);
+      if (inflow_count > 0) {
         int seg_w = screen_w / inflow_count;
         int idx   = 0;
 
         const int yLabel  = 10;
-        const int yPower  = 40;
-        const int yEnergy = 80;
-        const int yEuro   = 110;
+        const int yPower  = 40;  // leicht nach oben verschoben
+        const int yExtra  = 80;  // dritte Zeile (Energie/Geld)
 
         auto draw_inflow = [&](const char* label,
                                const char* value,
-                               const std::string &energy_text,
-                               const std::string &value_text) {
+                               bool draw_extra,
+                               const std::string &extra_text) {
           int cx = idx * seg_w + seg_w / 2;
 
           std::string lbl_str(label);
           int lbl_px = tiny_text_width(lbl_str);
-          int val_px = strlen(value) * cw_big;
+          int val_px = strlen(value) * cw_big;  // Watt-Zeile bleibt myFont
 
-          it.printf(cx - lbl_px/2, yLabel,  id(tinyFont), "%s", label);
-          it.printf(cx - val_px/2, yPower,  id(myFont),   "%s", value);
+          it.printf(cx - lbl_px/2, yLabel, id(tinyFont), "%s", label);
+          it.printf(cx - val_px/2, yPower, id(myFont),   "%s", value);
 
-          if (!energy_text.empty()) {
-            int e_px = tiny_text_width(energy_text);
-            it.printf(cx - e_px/2, yEnergy, id(tinyFont), "%s", energy_text.c_str());
-          }
-
-          if (!value_text.empty()) {
-            int v_px = tiny_text_width(value_text);
-            it.printf(cx - v_px/2, yEuro,   id(tinyFont), "%s", value_text.c_str());
+          if (draw_extra && !extra_text.empty()) {
+            int extra_px = tiny_text_width(extra_text);
+            it.printf(cx - extra_px/2, yExtra, id(tinyFont), "%s", extra_text.c_str());
           }
 
           idx++;
         };
 
-        // Power-Strings
+        // Strings vorbereiten
         char pv_full[32], bez_full[32], bat_full[32];
-        if (vPV > 0)
-          sprintf(pv_full, "%s (%d%%)", sPV, pv_pct);
-        else
-          sprintf(pv_full, "%s", sPV);
-        sprintf(bez_full, "%s", sBezug);
-        sprintf(bat_full, "%s", sBatMinusStr);
+        sprintf(pv_full,  "%s (%d%%)", sPV, pv_pct);
+        sprintf(bez_full, "%s",        sBezug);
+        sprintf(bat_full, "%s",        sBatMinusStr);
 
-        // Energie- und Euro-Strings
-        char buf[32];
-        std::string pv_energy_str, pv_value_str;
-        std::string bez_energy_str, bez_value_str;
-        std::string bat_energy_str, bat_value_str;
+        char buf[40];
+        std::string pv_today_str;
+        std::string bez_today_str;
+        std::string bat_today_str;
 
-        sprintf(buf, "%.2f kWh", pv_today);
-        pv_energy_str = buf;
-        sprintf(buf, "%.2f €", pv_value);
-        pv_value_str = buf;
+        // *** HIER angepasst: kWh mit 1 Nachkommastelle ***
+        sprintf(buf, "%.1f kWh (%.2f €)", pv_today,   pv_value);
+        pv_today_str = buf;
+        sprintf(buf, "%.1f kWh (%.2f €)", grid_today, grid_value);
+        bez_today_str = buf;
+        sprintf(buf, "%.1f kWh (%.2f €)", bat_today,  bat_value);
+        bat_today_str = buf;
 
-        sprintf(buf, "%.2f kWh", grid_today);
-        bez_energy_str = buf;
-        sprintf(buf, "%.2f €", grid_value);
-        bez_value_str = buf;
-
-        sprintf(buf, "%.2f kWh", bat_today);
-        bat_energy_str = buf;
-        sprintf(buf, "%.2f €", bat_value);
-        bat_value_str = buf;
-
-        // Labels (mit Prozent nur bei >1 aktivem Zufluss)
+        // Labels (mit/ohne Prozent)
         char lblSolar[32]      = "Solar";
         char lblBezug[32]      = "Netz";
         char lblBatterieIn[32] = "Batterie";
 
-        if (totalIn > 0 && active_inflow_count > 1) {
+        // Prozent nur, wenn mehr als ein Element angezeigt wird
+        if (totalIn > 0 && inflow_count > 1) {
           if (shareSolar > 0)
             sprintf(lblSolar, "Solar %d%%", shareSolar);
           if (shareBezug > 0)
@@ -373,15 +360,19 @@ display:
             sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
         }
 
-        // Reihenfolge: Solar – Netz – Batterie
-        idx = 0;
-        draw_inflow(lblSolar,      pv_full,  pv_energy_str,  pv_value_str);
-        draw_inflow(lblBezug,      bez_full, bez_energy_str, bez_value_str);
-        draw_inflow(lblBatterieIn, bat_full, bat_energy_str, bat_value_str);
+        if (showSolar) {
+          draw_inflow(lblSolar, pv_full, true, pv_today_str);
+        }
+        if (showBezug) {
+          draw_inflow(lblBezug, bez_full, true, bez_today_str);
+        }
+        if (showBatIn) {
+          draw_inflow(lblBatterieIn, bat_full, true, bat_today_str);
+        }
       }
 
-      // Trenner etwas nach unten verschoben
-      it.filled_rectangle(10, 140, 780, 5);
+      // Trenner
+      it.filled_rectangle(10,130,780,5);
 
       // ----------------------------------------------------
       // VERBRAUCHER – dynamische 2-Zeilen-Verteilung
@@ -422,6 +413,7 @@ display:
         shareEins = (int) lroundf(pEinsC * 100.0f / totalCons);
       }
 
+      // Anzahl der "echten" Verbraucher (ohne Warmwasser), die >0 sind
       int consumer_count =
           (pHausC  > 0 ? 1 : 0) +
           (pHeatC  > 0 ? 1 : 0) +
@@ -429,7 +421,7 @@ display:
           (pBatC   > 0 ? 1 : 0) +
           (pEinsC  > 0 ? 1 : 0);
 
-      // Labels für Verbraucher
+      // Labels für Verbraucher (mit Prozent, außer Warmwasser)
       char lblHaus[32]       = "Haus";
       char lblHeiz[32]       = "Heizstab";
       char lblEQA[32]        = "EQA";
@@ -437,6 +429,7 @@ display:
       char lblBatVerbr[32]   = "Batterie";
       char lblEinspeisung[32]= "Einspeisung";
 
+      // Prozent nur, wenn mehr als ein echter Verbraucher angezeigt wird
       if (totalCons > 0 && consumer_count > 1) {
         if (shareHaus > 0)
           sprintf(lblHaus, "Haus %d%%", shareHaus);
@@ -449,6 +442,7 @@ display:
         if (shareEins > 0)
           sprintf(lblEinspeisung, "Einspeisung %d%%", shareEins);
       }
+      // Warmwasser-Label bleibt ohne Prozent
 
       struct Item {
         const char* label;
@@ -467,31 +461,31 @@ display:
 
       int vis_idx[6];
       int n_vis = 0;
-      for (int i=0;i<6;i++){
+      for (int i = 0; i < 6; i++) {
         if (items[i].show) vis_idx[n_vis++] = i;
       }
 
       if (n_vis > 0) {
-        int row1=0, row2=0;
-        switch(n_vis){
-          case 1: row1=1; row2=0; break;
-          case 2: row1=2; row2=0; break;
-          case 3: row1=2; row2=1; break;
-          case 4: row1=2; row2=2; break;
-          case 5: row1=3; row2=2; break;
-          default: row1=3; row2=n_vis-3; break;
+        int row1 = 0, row2 = 0;
+        switch (n_vis) {
+          case 1: row1 = 1; row2 = 0; break;
+          case 2: row1 = 2; row2 = 0; break;
+          case 3: row1 = 2; row2 = 1; break;
+          case 4: row1 = 2; row2 = 2; break;
+          case 5: row1 = 3; row2 = 2; break;
+          default: row1 = 3; row2 = n_vis - 3; break;
         }
 
-        auto draw_row = [&](int start, int count, int yL, int yV){
-          if (count<=0) return;
+        auto draw_row = [&](int start, int count, int yL, int yV) {
+          if (count <= 0) return;
           int seg_w = screen_w / count;
-          for (int k=0;k<count;k++){
-            Item &it_item = items[vis_idx[start+k]];
-            int cx = k*seg_w + seg_w/2;
-            int lbl_px = strlen(it_item.label)*cw_big;
-            int val_px = strlen(it_item.value)*cw_big;
-            it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
-            it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
+          for (int k = 0; k < count; k++) {
+            Item &it_item = items[vis_idx[start + k]];
+            int cx = k * seg_w + seg_w / 2;
+            int lbl_px = strlen(it_item.label) * cw_big;
+            int val_px = strlen(it_item.value) * cw_big;
+            it.printf(cx - lbl_px / 2, yL, id(myFont), "%s", it_item.label);
+            it.printf(cx - val_px / 2, yV, id(myFont), "%s", it_item.value);
           }
         };
 
@@ -502,45 +496,45 @@ display:
       // ----------------------------------------------------
       // SOC-BALKEN
       // ----------------------------------------------------
-      const int bx=50, by=440, bw=700, bh=20;
+      const int bx = 50, by = 440, bw = 700, bh = 20;
 
       char sSoc[64];
-      if (!sZeit.empty() && sZeit!="unknown" && sZeit!="unavailable"){
+      if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
         float h = strtof(sZeit.c_str(), nullptr);
-        if (h>0 && h<999){
-          int hh = (int)floor(h);
-          int mm = (int)lround((h-hh)*60.0f);
-          if (mm>=60){ mm-=60; hh++; }
-          sprintf(sSoc,"Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
+        if (h > 0 && h < 999) {
+          int hh = (int) floor(h);
+          int mm = (int) lround((h - hh) * 60.0f);
+          if (mm >= 60) { mm -= 60; hh++; }
+          sprintf(sSoc, "Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
         } else {
-          sprintf(sSoc,"Batterie: %d%%", vSOC);
+          sprintf(sSoc, "Batterie: %d%%", vSOC);
         }
       } else {
-        sprintf(sSoc,"Batterie: %d%%", vSOC);
+        sprintf(sSoc, "Batterie: %d%%", vSOC);
       }
 
       std::string soc_str = sSoc;
       int soc_px = tiny_text_width(soc_str);
       int soc_x  = bx + bw/2 - soc_px/2;
-      it.printf(soc_x, by-40, id(tinyFont), "%s", sSoc);
+      it.printf(soc_x, by - 40, id(tinyFont), "%s", sSoc);
 
-      it.rectangle(bx,by,bw,bh);
+      it.rectangle(bx, by, bw, bh);
 
-      int fw = bw * clamp(vSOC)/100;
-      if (fw>0) it.filled_rectangle(bx,by,fw,bh);
+      int fw = bw * clamp(vSOC) / 100;
+      if (fw > 0) it.filled_rectangle(bx, by, fw, bh);
 
       // Kleine Ticks 0–90 %
-      for (int i=0;i<=9;i++){
-        int tx = bx + (bw*i)/10;
-        it.line(tx, by+bh+2, tx, by+bh+8);
+      for (int i = 0; i <= 9; i++) {
+        int tx = bx + (bw * i) / 10;
+        it.line(tx, by + bh + 2, tx, by + bh + 8);
       }
 
       // Dicke Ticks bei 0/25/50/75/100 (100% -2 px)
-      int marks[5]={0,25,50,75,100};
-      for (int i=0;i<5;i++){
+      int marks[5] = {0, 25, 50, 75, 100};
+      for (int i = 0; i < 5; i++) {
         int p = marks[i];
-        int tx = bx + (bw*p)/100;
-        if (p==100) tx -= 2;
-        it.line(tx,     by+bh-2, tx,     by+bh+10);
-        it.line(tx + 1, by+bh-2, tx + 1, by+bh+10);
+        int tx = bx + (bw * p) / 100;
+        if (p == 100) tx -= 2;
+        it.line(tx,     by + bh - 2, tx,     by + bh + 10);
+        it.line(tx + 1, by + bh - 2, tx + 1, by + bh + 10);
       }
