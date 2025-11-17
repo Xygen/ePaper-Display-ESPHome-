@@ -1,13 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.27
+#  Version: 1.28
 #  Änderungen:
-#    - Zufluss-Elemente (Solar, Netz, Batterie) werden immer angezeigt,
-#      auch bei 0 W.
-#    - Prozentanteile im Label (Solar/Netz/Batterie) nur, wenn mind. zwei
-#      dieser drei Zuflüsse Leistung > 0 W haben.
-#    - Bei Solar wird der Leistungs-Prozentwert (pv_pct) nur angezeigt,
-#      wenn vPV > 0 W. Bei 0 W kein "(0%)".
+#    - tinyFont-Zeichenbreiten-LUT um Buchstaben für "Solar", "Netz",
+#      "Batterie" und alle übrigen verwendeten Label-Texte erweitert,
+#      um die Zentrierung zu verbessern.
 # --------------------------------------------------------------------
 
 esphome:
@@ -148,19 +145,57 @@ display:
 
       auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
 
-      // --- Zeichenbreiten-LUT für tinyFont ----------------
+      // --- Zeichenbreiten-LUT für tinyFont (Inter @ 28) ---
       auto tiny_char_width = [](char c) -> int {
         switch (c) {
+          // Ziffern
           case '0': case '8': case '9': return 15;
           case '1':                     return 11;
           case '2': case '3': case '4':
           case '5': case '6': case '7': return 14;
-          case 'k': case 'W': case 'h': return 14;
-          case '(': case ')':           return 10;
-          case '.': case ',':           return 7;
-          case ':':                     return 7;
-          case ' ':                     return 8;
-          default:                      return 14;  // Fallback (u.a. €)
+
+          // Großbuchstaben
+          case 'A': case 'B': case 'D': case 'E':
+          case 'H': case 'K': case 'N': case 'R':
+          case 'U': case 'V': case 'X': case 'Y': case 'Z':
+            return 16;
+          case 'C': case 'G': case 'O': case 'Q':
+            return 17;
+          case 'F': case 'L': case 'P': case 'S': case 'T':
+            return 15;
+          case 'I': case 'J':
+            return 11;
+          case 'M': case 'W':
+            return 19;
+
+          // Kleinbuchstaben (z.B. solar, netz, batterie, haus, warmwasser, eqa)
+          case 'a': case 'c': case 'e': case 'o':
+            return 13;
+          case 'b': case 'd': case 'g': case 'h':
+          case 'n': case 'p': case 'q': case 'u':
+            return 14;
+          case 'i': case 'j':
+            return 8;
+          case 'k': case 'r': case 's': case 't':
+            return 12;
+          case 'l':
+            return 7;
+          case 'm':
+            return 18;
+          case 'v': case 'x':
+            return 13;
+          case 'w':
+            return 17;
+          case 'y': case 'z':
+            return 12;
+
+          // Einheiten & Satzzeichen
+          case '(': case ')': return 10;
+          case '.': case ',': return 7;
+          case ':':           return 7;
+          case ' ':           return 8;
+
+          default: return 14; // Fallback
         }
       };
 
@@ -241,9 +276,9 @@ display:
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
       // ----------------------------------------------------
-      // Beiträge für die Anteilsberechnung (nur >=0)
-      int pSolar = (vPV > 0) ? vPV : 0;
-      int pBezug = (vBezug > 0) ? vBezug : 0;
+      // Beiträge für die Anteilsberechnung (nur >0)
+      int pSolar = (vPV > 0)       ? vPV       : 0;
+      int pBezug = (vBezug > 0)    ? vBezug    : 0;
       int pBatIn = (vBatMinus > 0) ? vBatMinus : 0;
 
       int totalIn = pSolar + pBezug + pBatIn;
@@ -304,8 +339,8 @@ display:
         else
           sprintf(pv_full, "%s", sPV);
 
-        sprintf(bez_full, "%s",        sBezug);
-        sprintf(bat_full, "%s",        sBatMinusStr);
+        sprintf(bez_full, "%s", sBezug);
+        sprintf(bat_full, "%s", sBatMinusStr);
 
         char buf[40];
         std::string pv_today_str;
@@ -431,31 +466,31 @@ display:
 
       int vis_idx[6];
       int n_vis = 0;
-      for (int i=0;i<6;i++){
+      for (int i = 0; i < 6; i++) {
         if (items[i].show) vis_idx[n_vis++] = i;
       }
 
       if (n_vis > 0) {
-        int row1=0, row2=0;
-        switch(n_vis){
-          case 1: row1=1; row2=0; break;
-          case 2: row1=2; row2=0; break;
-          case 3: row1=2; row2=1; break;
-          case 4: row1=2; row2=2; break;
-          case 5: row1=3; row2=2; break;
-          default: row1=3; row2=n_vis-3; break;
+        int row1 = 0, row2 = 0;
+        switch (n_vis) {
+          case 1: row1 = 1; row2 = 0; break;
+          case 2: row1 = 2; row2 = 0; break;
+          case 3: row1 = 2; row2 = 1; break;
+          case 4: row1 = 2; row2 = 2; break;
+          case 5: row1 = 3; row2 = 2; break;
+          default: row1 = 3; row2 = n_vis - 3; break;
         }
 
-        auto draw_row = [&](int start, int count, int yL, int yV){
-          if (count<=0) return;
+        auto draw_row = [&](int start, int count, int yL, int yV) {
+          if (count <= 0) return;
           int seg_w = screen_w / count;
-          for (int k=0;k<count;k++){
-            Item &it_item = items[vis_idx[start+k]];
-            int cx = k*seg_w + seg_w/2;
-            int lbl_px = strlen(it_item.label)*cw_big;
-            int val_px = strlen(it_item.value)*cw_big;
-            it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
-            it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
+          for (int k = 0; k < count; k++) {
+            Item &it_item = items[vis_idx[start + k]];
+            int cx = k * seg_w + seg_w / 2;
+            int lbl_px = strlen(it_item.label) * cw_big;
+            int val_px = strlen(it_item.value) * cw_big;
+            it.printf(cx - lbl_px / 2, yL, id(myFont), "%s", it_item.label);
+            it.printf(cx - val_px / 2, yV, id(myFont), "%s", it_item.value);
           }
         };
 
@@ -466,45 +501,45 @@ display:
       // ----------------------------------------------------
       // SOC-BALKEN
       // ----------------------------------------------------
-      const int bx=50, by=440, bw=700, bh=20;
+      const int bx = 50, by = 440, bw = 700, bh = 20;
 
       char sSoc[64];
-      if (!sZeit.empty() && sZeit!="unknown" && sZeit!="unavailable"){
+      if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
         float h = strtof(sZeit.c_str(), nullptr);
-        if (h>0 && h<999){
-          int hh = (int)floor(h);
-          int mm = (int)lround((h-hh)*60.0f);
-          if (mm>=60){ mm-=60; hh++; }
-          sprintf(sSoc,"Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
+        if (h > 0 && h < 999) {
+          int hh = (int) floor(h);
+          int mm = (int) lround((h - hh) * 60.0f);
+          if (mm >= 60) { mm -= 60; hh++; }
+          sprintf(sSoc, "Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
         } else {
-          sprintf(sSoc,"Batterie: %d%%", vSOC);
+          sprintf(sSoc, "Batterie: %d%%", vSOC);
         }
       } else {
-        sprintf(sSoc,"Batterie: %d%%", vSOC);
+        sprintf(sSoc, "Batterie: %d%%", vSOC);
       }
 
       std::string soc_str = sSoc;
       int soc_px = tiny_text_width(soc_str);
       int soc_x  = bx + bw/2 - soc_px/2;
-      it.printf(soc_x, by-40, id(tinyFont), "%s", sSoc);
+      it.printf(soc_x, by - 40, id(tinyFont), "%s", sSoc);
 
-      it.rectangle(bx,by,bw,bh);
+      it.rectangle(bx, by, bw, bh);
 
-      int fw = bw * clamp(vSOC)/100;
-      if (fw>0) it.filled_rectangle(bx,by,fw,bh);
+      int fw = bw * clamp(vSOC) / 100;
+      if (fw > 0) it.filled_rectangle(bx, by, fw, bh);
 
-      // Kleine Ticks nur 0–90 %
-      for (int i=0;i<=9;i++){
-        int tx = bx + (bw*i)/10;
-        it.line(tx, by+bh+2, tx, by+bh+8);
+      // Kleine Ticks 0–90 %
+      for (int i = 0; i <= 9; i++) {
+        int tx = bx + (bw * i) / 10;
+        it.line(tx, by + bh + 2, tx, by + bh + 8);
       }
 
       // Dicke Ticks bei 0/25/50/75/100 (100% -2 px)
-      int marks[5]={0,25,50,75,100};
-      for (int i=0;i<5;i++){
+      int marks[5] = {0, 25, 50, 75, 100};
+      for (int i = 0; i < 5; i++) {
         int p = marks[i];
-        int tx = bx + (bw*p)/100;
-        if (p==100) tx -= 2;
-        it.line(tx,     by+bh-2, tx,     by+bh+10);
-        it.line(tx + 1, by+bh-2, tx + 1, by+bh+10);
+        int tx = bx + (bw * p) / 100;
+        if (p == 100) tx -= 2;
+        it.line(tx,     by + bh - 2, tx,     by + bh + 10);
+        it.line(tx + 1, by + bh - 2, tx + 1, by + bh + 10);
       }
