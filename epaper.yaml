@@ -1,9 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.33
+#  Version: 1.34
 #  Änderungen:
-#    - kW-Leistungsanzeige: nur 1 Nachkommastelle, wenn die zweite 0 ist
-#    - sonst 2 Nachkommastellen (z.B. 2.34 kW)
+#    - Basis: 1.33
+#    - Verbrauchsblock: dritte Zeile für Energie + Euro-Wert pro Element
+#      (aktuell nur EQA mit echter Energie-Entität)
 # --------------------------------------------------------------------
 
 esphome:
@@ -103,6 +104,11 @@ text_sensor:
   - platform: homeassistant
     entity_id: input_number.strompreis
     id: Strompreis
+    internal: true
+  # Energie EQA (bitte Entität bei Bedarf anpassen!)
+  - platform: homeassistant
+    entity_id: sensor.shelly_plug_mercedes_eqa_250_energy_today
+    id: EqaEnergyToday
     internal: true
 
 spi:
@@ -232,6 +238,7 @@ display:
       float vBatDisToday = as_float(id(BatDischargeToday).state);
       float vGridToday   = as_float(id(GridEnergyToday).state);
       float vPrice       = as_float(id(Strompreis).state);
+      float vEqaToday    = as_float(id(EqaEnergyToday).state);  // EQA-Energie
 
       std::string sZeit = id(ZeitBisVoll).state;
 
@@ -257,7 +264,7 @@ display:
                         ? clamp((int) lroundf((vBatPlus / 5090.0f) * 100.0f))
                         : 0;
 
-      // Tageserträge + Werte
+      // Tageserträge + Werte (Zufluss)
       float pv_today   = vPV1Today + vPV2Today;
       float pv_value   = pv_today   * vPrice;
 
@@ -266,6 +273,10 @@ display:
 
       float grid_today = vGridToday;
       float grid_value = grid_today * vPrice;
+
+      // EQA-Energie + Wert (Verbrauchsblock)
+      float eqa_today  = vEqaToday;
+      float eqa_value  = eqa_today * vPrice;
 
       // ---- Formatstrings für Leistungen ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
@@ -281,7 +292,7 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // myFont (für Verbraucher-Labels/Werte)
+      const int cw_big   = 18;  // myFont (Breitenschätzung)
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
@@ -382,7 +393,7 @@ display:
       it.filled_rectangle(10,130,780,5);
 
       // ----------------------------------------------------
-      // VERBRAUCHER – dynamische 2-Zeilen-Verteilung
+      // VERBRAUCHER – dynamische 2-Zeilen-Verteilung + Energiezeile
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -448,19 +459,32 @@ display:
           sprintf(lblEinspeisung, "Einspeisung %d%%", shareEins);
       }
 
+      // Energie-Strings im Verbrauchsblock (aktuell nur EQA befüllt)
+      char eHaus[40] = "";
+      char eHeat[40] = "";
+      char eEQA[40]  = "";
+      char eWW[40]   = "";
+      char eBatC[40] = "";
+      char eEins[40] = "";
+
+      if (eqa_today > 0.0f || eqa_value > 0.0f) {
+        sprintf(eEQA, "%.1f kWh (%.2f €)", eqa_today, eqa_value);
+      }
+
       struct Item {
         const char* label;
         const char* value;
+        const char* extra;  // Energiezeile
         bool show;
       };
 
       Item items[6] = {
-        { lblHaus,        h_full,    (vHaus != 0) },
-        { lblHeiz,        heat_full, (vHeat != 0) },
-        { lblEQA,         eqa_full,  (vEQA  != 0) },
-        { lblWW,          ww_full,   true        },
-        { lblBatVerbr,    batp_full, (vBatPlus     != 0) },
-        { lblEinspeisung, eins_full, (vEinspeisung > 0) }
+        { lblHaus,        h_full,    eHaus,  (vHaus != 0) },
+        { lblHeiz,        heat_full, eHeat,  (vHeat != 0) },
+        { lblEQA,         eqa_full,  eEQA,   (vEQA  != 0) },
+        { lblWW,          ww_full,   eWW,    true        },
+        { lblBatVerbr,    batp_full, eBatC,  (vBatPlus     != 0) },
+        { lblEinspeisung, eins_full, eEins,  (vEinspeisung > 0) }
       };
 
       int vis_idx[6];
@@ -480,21 +504,30 @@ display:
           default: row1=3; row2=n_vis-3; break;
         }
 
-        auto draw_row = [&](int start, int count, int yL, int yV){
+        auto draw_row = [&](int start, int count, int yL, int yV, int yE){
           if (count<=0) return;
           int seg_w = screen_w / count;
           for (int k=0;k<count;k++){
             Item &it_item = items[vis_idx[start+k]];
             int cx = k*seg_w + seg_w/2;
+
             int lbl_px = strlen(it_item.label)*cw_big;
             int val_px = strlen(it_item.value)*cw_big;
             it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
             it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
+
+            if (it_item.extra != nullptr && it_item.extra[0] != '\0') {
+              std::string extra_str(it_item.extra);
+              int extra_px = tiny_text_width(extra_str);
+              it.printf(cx - extra_px/2, yE, id(tinyFont), "%s", it_item.extra);
+            }
           }
         };
 
-        draw_row(0, row1, 160, 200);
-        draw_row(row1, row2, 250, 290);
+        // obere Verbraucherzeile: Label 160, Wert 200, Energie 230
+        draw_row(0, row1, 160, 200, 230);
+        // untere Verbraucherzeile: Label 250, Wert 290, Energie 320
+        draw_row(row1, row2, 250, 290, 320);
       }
 
       // ----------------------------------------------------
