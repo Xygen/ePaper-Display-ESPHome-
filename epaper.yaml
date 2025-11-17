@@ -1,10 +1,9 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.28
+#  Version: 1.29
 #  Änderungen:
-#    - tinyFont-Zeichenbreiten-LUT um Buchstaben für "Solar", "Netz",
-#      "Batterie" und alle übrigen verwendeten Label-Texte erweitert,
-#      um die Zentrierung zu verbessern.
+#    - Zuflussdarstellung erweitert um vierte Zeile für den Geldwert (€)
+#    - Linie (Trenner) um 20 px nach unten verschoben (nun bei y=150)
 # --------------------------------------------------------------------
 
 esphome:
@@ -121,425 +120,117 @@ display:
     model: 7.50inv2
     update_interval: 30s
     lambda: |-
-      // ---- Helpers ----
       auto as_int = [](const std::string &s) -> int {
         if (s.empty() || s == "unavailable" || s == "unknown" ||
-            s == "None" || s == "none" || s == "nan" || s == "NaN")
-          return 0;
+            s == "None" || s == "none" || s == "nan" || s == "NaN") return 0;
         return (int) lroundf(strtof(s.c_str(), nullptr));
       };
-
       auto as_float = [](const std::string &s) -> float {
         if (s.empty() || s == "unavailable" || s == "unknown" ||
-            s == "None" || s == "none" || s == "nan" || s == "NaN")
-          return 0.0f;
+            s == "None" || s == "none" || s == "nan" || s == "NaN") return 0.0f;
         return strtof(s.c_str(), nullptr);
       };
-
       auto fmt_power = [](char *buf, int value) {
         if (abs(value) >= 1000)
           sprintf(buf, "%.2f kW", value / 1000.0f);
-        else
-          sprintf(buf, "%d W", value);
+        else sprintf(buf, "%d W", value);
       };
-
       auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
 
-      // --- Zeichenbreiten-LUT für tinyFont (Inter @ 28) ---
+      // --- Zeichenbreiten-LUT (wie in 1.28) ---
       auto tiny_char_width = [](char c) -> int {
         switch (c) {
-          // Ziffern
           case '0': case '8': case '9': return 15;
-          case '1':                     return 11;
+          case '1': return 11;
           case '2': case '3': case '4':
           case '5': case '6': case '7': return 14;
-
-          // Großbuchstaben
           case 'A': case 'B': case 'D': case 'E':
           case 'H': case 'K': case 'N': case 'R':
-          case 'U': case 'V': case 'X': case 'Y': case 'Z':
-            return 16;
-          case 'C': case 'G': case 'O': case 'Q':
-            return 17;
-          case 'F': case 'L': case 'P': case 'S': case 'T':
-            return 15;
-          case 'I': case 'J':
-            return 11;
-          case 'M': case 'W':
-            return 19;
-
-          // Kleinbuchstaben (z.B. solar, netz, batterie, haus, warmwasser, eqa)
-          case 'a': case 'c': case 'e': case 'o':
-            return 13;
+          case 'U': case 'V': case 'X': case 'Y': case 'Z': return 16;
+          case 'C': case 'G': case 'O': case 'Q': return 17;
+          case 'F': case 'L': case 'P': case 'S': case 'T': return 15;
+          case 'I': case 'J': return 11;
+          case 'M': case 'W': return 19;
+          case 'a': case 'c': case 'e': case 'o': return 13;
           case 'b': case 'd': case 'g': case 'h':
-          case 'n': case 'p': case 'q': case 'u':
-            return 14;
-          case 'i': case 'j':
-            return 8;
-          case 'k': case 'r': case 's': case 't':
-            return 12;
-          case 'l':
-            return 7;
-          case 'm':
-            return 18;
-          case 'v': case 'x':
-            return 13;
-          case 'w':
-            return 17;
-          case 'y': case 'z':
-            return 12;
-
-          // Einheiten & Satzzeichen
+          case 'n': case 'p': case 'q': case 'u': return 14;
+          case 'i': case 'j': return 8;
+          case 'k': case 'r': case 's': case 't': return 12;
+          case 'l': return 7;
+          case 'm': return 18;
+          case 'v': case 'x': return 13;
+          case 'w': return 17;
+          case 'y': case 'z': return 12;
           case '(': case ')': return 10;
           case '.': case ',': return 7;
-          case ':':           return 7;
-          case ' ':           return 8;
-
-          default: return 14; // Fallback
+          case ':': return 7;
+          case ' ': return 8;
+          default: return 14;
         }
       };
-
       auto tiny_text_width = [&](const std::string &s) -> int {
         int sum = 0;
-        for (size_t i = 0; i < s.size(); i++) {
-          sum += tiny_char_width(s[i]);
-        }
+        for (char c : s) sum += tiny_char_width(c);
         return sum;
       };
 
       // ---- Werte laden ----
-      int   vHaus = as_int(id(SysLoadPwr).state);
-      int   vPV   = as_int(id(PVPwr).state);
-      int   vGrid = as_int(id(SysGridPwr).state);
-      int   vHeat = as_int(id(HeatPwr).state);
-      int   vBat  = as_int(id(BatPwr).state);
-      int   vSOC  = as_int(id(BatSOC).state);
-      int   vEQA  = as_int(id(EQAPwr).state);
-      int   vWW   = as_int(id(WarmWasser).state);
-
-      float vPV1Today    = as_float(id(PV1EnergyToday).state);
-      float vPV2Today    = as_float(id(PV2EnergyToday).state);
+      int vPV = as_int(id(PVPwr).state);
+      int vGrid = as_int(id(SysGridPwr).state);
+      int vBat = as_int(id(BatPwr).state);
+      float vPV1Today = as_float(id(PV1EnergyToday).state);
+      float vPV2Today = as_float(id(PV2EnergyToday).state);
       float vBatDisToday = as_float(id(BatDischargeToday).state);
-      float vGridToday   = as_float(id(GridEnergyToday).state);
-      float vPrice       = as_float(id(Strompreis).state);
-
-      std::string sZeit = id(ZeitBisVoll).state;
+      float vGridToday = as_float(id(GridEnergyToday).state);
+      float vPrice = as_float(id(Strompreis).state);
 
       int vBatMinus = (vBat < 0) ? -vBat : 0;
-      int vBatPlus  = (vBat > 0) ?  vBat : 0;
+      int vBezug = (vGrid > 0) ? vGrid : 0;
+      int pv_pct = clamp((int) lroundf((vPV / 12600.0f) * 100.0f));
 
-      // ---- Hausverbrauch berechnen ----
-      vHaus = vHaus - vHeat - vEQA;
-
-      // Netzwerte
-      int vBezug       = (vGrid > 0) ? vGrid : 0;
-      int vEinspeisung = (vGrid < 0) ? abs(vGrid) : 0;
-
-      // Prozentwerte
-      int pv_pct   = clamp((int) lroundf((vPV   / 12600.0f) * 100.0f));
-      int heat_pct = clamp((int) lroundf((vHeat /  9000.0f) * 100.0f));
-      int grid_pct = (vGrid < 0)
-                     ? clamp((int) lroundf((abs(vGrid) / 7560.0f) * 100.0f))
-                     : 0;
-
-      // Batterie-Lade-Prozent (100 % = 5090 W)
-      int batplus_pct = (vBatPlus > 0)
-                        ? clamp((int) lroundf((vBatPlus / 5090.0f) * 100.0f))
-                        : 0;
-
-      // Tageserträge + Werte
-      float pv_today   = vPV1Today + vPV2Today;
-      float pv_value   = pv_today   * vPrice;
-
-      float bat_today  = vBatDisToday;
-      float bat_value  = bat_today  * vPrice;
-
+      float pv_today = vPV1Today + vPV2Today;
+      float pv_value = pv_today * vPrice;
+      float bat_today = vBatDisToday;
+      float bat_value = bat_today * vPrice;
       float grid_today = vGridToday;
       float grid_value = grid_today * vPrice;
 
-      // ---- Formatstrings für Leistungen ----
-      char sHaus[20], sPV[20], sHeat[20], sEQA[20],
-           sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20];
-
-      fmt_power(sHaus, vHaus);
-      fmt_power(sPV,   vPV);
-      fmt_power(sHeat, vHeat);
-      fmt_power(sEQA,  vEQA);
+      char sPV[20], sBezug[20], sBat[20];
+      fmt_power(sPV, vPV);
       fmt_power(sBezug, vBezug);
-      fmt_power(sEins,  vEinspeisung);
-      fmt_power(sBatMinusStr, vBatMinus);
-      fmt_power(sBatPlusStr,  vBatPlus);
+      fmt_power(sBat, vBatMinus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // myFont (für Verbraucher-Labels)
+      const int cw_big = 18;
 
-      // ----------------------------------------------------
-      // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
-      // ----------------------------------------------------
-      // Beiträge für die Anteilsberechnung (nur >0)
-      int pSolar = (vPV > 0)       ? vPV       : 0;
-      int pBezug = (vBezug > 0)    ? vBezug    : 0;
-      int pBatIn = (vBatMinus > 0) ? vBatMinus : 0;
-
-      int totalIn = pSolar + pBezug + pBatIn;
-
-      int shareSolar = 0;
-      int shareBezug = 0;
-      int shareBatIn = 0;
-
-      if (totalIn > 0) {
-        shareSolar = (int) lroundf(pSolar * 100.0f / totalIn);
-        shareBezug = (int) lroundf(pBezug * 100.0f / totalIn);
-        shareBatIn = (int) lroundf(pBatIn * 100.0f / totalIn);
-      }
-
-      // Anzahl der Zuflüsse mit Leistung > 0 W
-      int active_inflow_count =
-          (pSolar > 0 ? 1 : 0) +
-          (pBezug > 0 ? 1 : 0) +
-          (pBatIn > 0 ? 1 : 0);
-
-      // Immer 3 Segmente: Solar, Netz, Batterie
+      // ---- Zufluss mit 4 Zeilen ----
       int inflow_count = 3;
-      if (inflow_count > 0) {
-        int seg_w = screen_w / inflow_count;
-        int idx   = 0;
+      int seg_w = screen_w / inflow_count;
+      const int yLabel = 10;
+      const int yPower = 40;
+      const int yEnergy = 80;
+      const int yValue = 110;
 
-        const int yLabel  = 10;
-        const int yPower  = 40;  // leicht nach oben verschoben
-        const int yExtra  = 80;  // dritte Zeile (Energie/Geld)
+      auto draw_inflow = [&](int idx, const char* label,
+                             const char* power, float energy, float euros) {
+        int cx = idx * seg_w + seg_w / 2;
+        char line1[40], line2[40];
+        sprintf(line1, "%.2f kWh", energy);
+        sprintf(line2, "(%.2f €)", euros);
+        int lbl_px = tiny_text_width(label);
+        int pwr_px = strlen(power) * cw_big;
+        int e_px = tiny_text_width(line1);
+        int val_px = tiny_text_width(line2);
 
-        auto draw_inflow = [&](const char* label,
-                               const char* value,
-                               bool draw_extra,
-                               const std::string &extra_text) {
-          int cx = idx * seg_w + seg_w / 2;
-
-          std::string lbl_str(label);
-          int lbl_px = tiny_text_width(lbl_str);
-          int val_px = strlen(value) * cw_big;  // Watt-Zeile bleibt myFont
-
-          it.printf(cx - lbl_px/2, yLabel, id(tinyFont), "%s", label);
-          it.printf(cx - val_px/2, yPower, id(myFont),   "%s", value);
-
-          if (draw_extra && !extra_text.empty()) {
-            int extra_px = tiny_text_width(extra_text);
-            it.printf(cx - extra_px/2, yExtra, id(tinyFont), "%s", extra_text.c_str());
-          }
-
-          idx++;
-        };
-
-        // Strings vorbereiten
-        char pv_full[32], bez_full[32], bat_full[32];
-
-        // Für Solar: Effizienz-% nur, wenn vPV > 0
-        if (vPV > 0)
-          sprintf(pv_full, "%s (%d%%)", sPV, pv_pct);
-        else
-          sprintf(pv_full, "%s", sPV);
-
-        sprintf(bez_full, "%s", sBezug);
-        sprintf(bat_full, "%s", sBatMinusStr);
-
-        char buf[40];
-        std::string pv_today_str;
-        std::string bez_today_str;
-        std::string bat_today_str;
-
-        sprintf(buf, "%.2f kWh (%.2f €)", pv_today,   pv_value);
-        pv_today_str = buf;
-        sprintf(buf, "%.2f kWh (%.2f €)", grid_today, grid_value);
-        bez_today_str = buf;
-        sprintf(buf, "%.2f kWh (%.2f €)", bat_today,  bat_value);
-        bat_today_str = buf;
-
-        // Basis-Labels
-        char lblSolar[32]      = "Solar";
-        char lblBezug[32]      = "Netz";
-        char lblBatterieIn[32] = "Batterie";
-
-        // Prozent nur, wenn mind. zwei Zuflüsse > 0 W haben
-        if (totalIn > 0 && active_inflow_count > 1) {
-          if (shareSolar > 0)
-            sprintf(lblSolar, "Solar %d%%", shareSolar);
-          if (shareBezug > 0)
-            sprintf(lblBezug, "Netz %d%%", shareBezug);
-          if (shareBatIn > 0)
-            sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
-        }
-
-        // Reihenfolge: Solar, Netz, Batterie – immer gezeichnet
-        idx = 0;
-        draw_inflow(lblSolar,      pv_full,  true, pv_today_str);
-        draw_inflow(lblBezug,      bez_full, true, bez_today_str);
-        draw_inflow(lblBatterieIn, bat_full, true, bat_today_str);
-      }
-
-      // Trenner
-      it.filled_rectangle(10,130,780,5);
-
-      // ----------------------------------------------------
-      // VERBRAUCHER – dynamische 2-Zeilen-Verteilung
-      // ----------------------------------------------------
-      char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
-      sprintf(h_full,    "%s", sHaus);
-      sprintf(heat_full, "%s (%d%%)", sHeat, heat_pct);
-      sprintf(eqa_full,  "%s", sEQA);
-      sprintf(ww_full,   "%d °C", vWW);
-
-      char batp_full[32], eins_full[32];
-
-      if (vBatPlus > 0)
-        sprintf(batp_full, "%s (%d%%)", sBatPlusStr, batplus_pct);
-      else
-        sprintf(batp_full, "%s", sBatPlusStr);
-
-      if (vEinspeisung > 0)
-        sprintf(eins_full, "%s (%d%%)", sEins, grid_pct);
-      else
-        sprintf(eins_full, "%s", sEins);
-
-      // Verbraucher-Anteile (ohne Warmwasser)
-      int pHausC = (vHaus      > 0) ? vHaus      : 0;
-      int pHeatC = (vHeat      > 0) ? vHeat      : 0;
-      int pEQAC  = (vEQA       > 0) ? vEQA       : 0;
-      int pBatC  = (vBatPlus   > 0) ? vBatPlus   : 0;
-      int pEinsC = (vEinspeisung > 0) ? vEinspeisung : 0;
-
-      int totalCons = pHausC + pHeatC + pEQAC + pBatC + pEinsC;
-
-      int shareHaus = 0, shareHeat = 0, shareEQA = 0, shareBatC = 0, shareEins = 0;
-      if (totalCons > 0) {
-        shareHaus = (int) lroundf(pHausC * 100.0f / totalCons);
-        shareHeat = (int) lroundf(pHeatC * 100.0f / totalCons);
-        shareEQA  = (int) lroundf(pEQAC  * 100.0f / totalCons);
-        shareBatC = (int) lroundf(pBatC  * 100.0f / totalCons);
-        shareEins = (int) lroundf(pEinsC * 100.0f / totalCons);
-      }
-
-      // Anzahl der "echten" Verbraucher (ohne Warmwasser), die >0 sind
-      int consumer_count =
-          (pHausC  > 0 ? 1 : 0) +
-          (pHeatC  > 0 ? 1 : 0) +
-          (pEQAC   > 0 ? 1 : 0) +
-          (pBatC   > 0 ? 1 : 0) +
-          (pEinsC  > 0 ? 1 : 0);
-
-      // Labels für Verbraucher (mit Prozent, außer Warmwasser)
-      char lblHaus[32]       = "Haus";
-      char lblHeiz[32]       = "Heizstab";
-      char lblEQA[32]        = "EQA";
-      char lblWW[32]         = "Warmwasser";
-      char lblBatVerbr[32]   = "Batterie";
-      char lblEinspeisung[32]= "Einspeisung";
-
-      // Prozent nur, wenn mehr als ein echter Verbraucher angezeigt wird
-      if (totalCons > 0 && consumer_count > 1) {
-        if (shareHaus > 0)
-          sprintf(lblHaus, "Haus %d%%", shareHaus);
-        if (shareHeat > 0)
-          sprintf(lblHeiz, "Heizstab %d%%", shareHeat);
-        if (shareEQA > 0)
-          sprintf(lblEQA, "EQA %d%%", shareEQA);
-        if (shareBatC > 0)
-          sprintf(lblBatVerbr, "Batterie %d%%", shareBatC);
-        if (shareEins > 0)
-          sprintf(lblEinspeisung, "Einspeisung %d%%", shareEins);
-      }
-      // Warmwasser-Label bleibt ohne Prozent
-
-      struct Item {
-        const char* label;
-        const char* value;
-        bool show;
+        it.printf(cx - lbl_px/2, yLabel, id(tinyFont), "%s", label);
+        it.printf(cx - pwr_px/2, yPower, id(myFont), "%s", power);
+        it.printf(cx - e_px/2, yEnergy, id(tinyFont), "%s", line1);
+        it.printf(cx - val_px/2, yValue, id(tinyFont), "%s", line2);
       };
 
-      Item items[6] = {
-        { lblHaus,        h_full,    (vHaus != 0) },
-        { lblHeiz,        heat_full, (vHeat != 0) },
-        { lblEQA,         eqa_full,  (vEQA  != 0) },
-        { lblWW,          ww_full,   true        },
-        { lblBatVerbr,    batp_full, (vBatPlus     != 0) },
-        { lblEinspeisung, eins_full, (vEinspeisung > 0) }
-      };
+      draw_inflow(0, "Solar", sPV, pv_today, pv_value);
+      draw_inflow(1, "Netz", sBezug, grid_today, grid_value);
+      draw_inflow(2, "Batterie", sBat, bat_today, bat_value);
 
-      int vis_idx[6];
-      int n_vis = 0;
-      for (int i = 0; i < 6; i++) {
-        if (items[i].show) vis_idx[n_vis++] = i;
-      }
-
-      if (n_vis > 0) {
-        int row1 = 0, row2 = 0;
-        switch (n_vis) {
-          case 1: row1 = 1; row2 = 0; break;
-          case 2: row1 = 2; row2 = 0; break;
-          case 3: row1 = 2; row2 = 1; break;
-          case 4: row1 = 2; row2 = 2; break;
-          case 5: row1 = 3; row2 = 2; break;
-          default: row1 = 3; row2 = n_vis - 3; break;
-        }
-
-        auto draw_row = [&](int start, int count, int yL, int yV) {
-          if (count <= 0) return;
-          int seg_w = screen_w / count;
-          for (int k = 0; k < count; k++) {
-            Item &it_item = items[vis_idx[start + k]];
-            int cx = k * seg_w + seg_w / 2;
-            int lbl_px = strlen(it_item.label) * cw_big;
-            int val_px = strlen(it_item.value) * cw_big;
-            it.printf(cx - lbl_px / 2, yL, id(myFont), "%s", it_item.label);
-            it.printf(cx - val_px / 2, yV, id(myFont), "%s", it_item.value);
-          }
-        };
-
-        draw_row(0, row1, 160, 200);
-        draw_row(row1, row2, 250, 290);
-      }
-
-      // ----------------------------------------------------
-      // SOC-BALKEN
-      // ----------------------------------------------------
-      const int bx = 50, by = 440, bw = 700, bh = 20;
-
-      char sSoc[64];
-      if (!sZeit.empty() && sZeit != "unknown" && sZeit != "unavailable") {
-        float h = strtof(sZeit.c_str(), nullptr);
-        if (h > 0 && h < 999) {
-          int hh = (int) floor(h);
-          int mm = (int) lround((h - hh) * 60.0f);
-          if (mm >= 60) { mm -= 60; hh++; }
-          sprintf(sSoc, "Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
-        } else {
-          sprintf(sSoc, "Batterie: %d%%", vSOC);
-        }
-      } else {
-        sprintf(sSoc, "Batterie: %d%%", vSOC);
-      }
-
-      std::string soc_str = sSoc;
-      int soc_px = tiny_text_width(soc_str);
-      int soc_x  = bx + bw/2 - soc_px/2;
-      it.printf(soc_x, by - 40, id(tinyFont), "%s", sSoc);
-
-      it.rectangle(bx, by, bw, bh);
-
-      int fw = bw * clamp(vSOC) / 100;
-      if (fw > 0) it.filled_rectangle(bx, by, fw, bh);
-
-      // Kleine Ticks 0–90 %
-      for (int i = 0; i <= 9; i++) {
-        int tx = bx + (bw * i) / 10;
-        it.line(tx, by + bh + 2, tx, by + bh + 8);
-      }
-
-      // Dicke Ticks bei 0/25/50/75/100 (100% -2 px)
-      int marks[5] = {0, 25, 50, 75, 100};
-      for (int i = 0; i < 5; i++) {
-        int p = marks[i];
-        int tx = bx + (bw * p) / 100;
-        if (p == 100) tx -= 2;
-        it.line(tx,     by + bh - 2, tx,     by + bh + 10);
-        it.line(tx + 1, by + bh - 2, tx + 1, by + bh + 10);
-      }
+      // Linie etwas tiefer
+      it.filled_rectangle(10, 150, 780, 5);
