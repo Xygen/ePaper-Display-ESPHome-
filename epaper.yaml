@@ -1,9 +1,13 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.46
-#  Änderungen ggü. 1.45:
-#    - Alle kWh-Werte werden mit genau 1 Nachkommastelle angezeigt
-#    - Euro-Beträge werden als "kWh €4.77" ausgegeben (Eurozeichen vor Zahl)
+#  Version: 1.47
+#  Änderungen ggü. 1.46:
+#    - Verbraucherblock von 6 auf 9 Elemente erweitert:
+#        Heizen, Kochen, Waschen
+#    - Layout: 3 Reihen à 3 Verbraucher
+#    - Die Leistungswerte Heizen/Kochen/Waschen werden von Haus-Leistung
+#      abgezogen
+#    - Die Energie Heizen/Kochen/Waschen wird von Haus-Energie abgezogen
 # --------------------------------------------------------------------
 
 esphome:
@@ -125,6 +129,32 @@ text_sensor:
     id: Strompreis
     internal: true
 
+  # Neue Verbraucher: Heizen, Kochen, Waschen (Leistung + Energie)
+  - platform: homeassistant
+    entity_id: sensor.total_power_label_heizen
+    id: HeizenPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_power_label_kochen
+    id: KochenPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_power_label_waschen
+    id: WaschenPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_energy_label_heizen_today
+    id: HeizenEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_energy_label_kochen_today
+    id: KochenEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_energy_label_waschen_today
+    id: WaschenEnergyToday
+    internal: true
+
 spi:
   clk_pin: GPIO8
   mosi_pin: GPIO10
@@ -173,7 +203,7 @@ display:
 
       auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
 
-      // kWh jetzt immer mit genau 1 Nachkommastelle
+      // kWh: immer genau eine Nachkommastelle
       auto fmt_energy = [](char *buf, float kwh) {
         float rounded = roundf(kwh * 10.0f) / 10.0f;
         sprintf(buf, "%.1f kWh", rounded);
@@ -242,14 +272,17 @@ display:
       };
 
       // ---- Werte laden ----
-      int   vHaus = as_int(id(SysLoadPwr).state);
-      int   vPV   = as_int(id(PVPwr).state);
-      int   vGrid = as_int(id(SysGridPwr).state);
-      int   vHeat = as_int(id(HeatPwr).state);
-      int   vBat  = as_int(id(BatPwr).state);
-      int   vSOC  = as_int(id(BatSOC).state);
-      int   vEQA  = as_int(id(EQAPwr).state);
-      int   vWW   = as_int(id(WarmWasser).state);
+      int   vHaus    = as_int(id(SysLoadPwr).state);
+      int   vPV      = as_int(id(PVPwr).state);
+      int   vGrid    = as_int(id(SysGridPwr).state);
+      int   vHeat    = as_int(id(HeatPwr).state);
+      int   vBat     = as_int(id(BatPwr).state);
+      int   vSOC     = as_int(id(BatSOC).state);
+      int   vEQA     = as_int(id(EQAPwr).state);
+      int   vWW      = as_int(id(WarmWasser).state);
+      int   vHeizen  = as_int(id(HeizenPwr).state);
+      int   vKochen  = as_int(id(KochenPwr).state);
+      int   vWaschen = as_int(id(WaschenPwr).state);
 
       float vPV1Today        = as_float(id(PV1EnergyToday).state);
       float vPV2Today        = as_float(id(PV2EnergyToday).state);
@@ -260,6 +293,9 @@ display:
       float vEQAEnergyToday  = as_float(id(EQAEnergyToday).state);
       float vEinsEnergyToday = as_float(id(EinsEnergyToday).state);
       float vHausEnergyToday = as_float(id(HausEnergyToday).state);
+      float vHeizenEnergyToday  = as_float(id(HeizenEnergyToday).state);
+      float vKochenEnergyToday  = as_float(id(KochenEnergyToday).state);
+      float vWaschenEnergyToday = as_float(id(WaschenEnergyToday).state);
       float vPrice           = as_float(id(Strompreis).state);
 
       std::string sZeit = id(ZeitBisVoll).state;
@@ -268,7 +304,8 @@ display:
       int vBatPlus  = (vBat > 0) ?  vBat : 0;
 
       // ---- Hausleistung berechnen ----
-      vHaus = vHaus - vHeat - vEQA;
+      //  Haus = Gesamtlast - Heizstab - EQA - Heizen - Kochen - Waschen
+      vHaus = vHaus - vHeat - vEQA - vHeizen - vKochen - vWaschen;
 
       // Netzwerte
       int vBezug       = (vGrid > 0) ? vGrid : 0;
@@ -301,23 +338,32 @@ display:
       float grid_today = vGridToday;
       float grid_value = grid_today   * vPrice;
 
-      // Haus-Energie = SysLoadEnergyToday - HeizstabEnergyToday - EQAEnergyToday
-      float haus_energy   = vHausEnergyToday - vHeatToday - vEQAEnergyToday;
+      // Haus-Energie = SysLoadEnergyToday - Heizstab - EQA - Heizen - Kochen - Waschen
+      float haus_energy = vHausEnergyToday
+                          - vHeatToday
+                          - vEQAEnergyToday
+                          - vHeizenEnergyToday
+                          - vKochenEnergyToday
+                          - vWaschenEnergyToday;
       if (haus_energy < 0.0f) haus_energy = 0.0f;
-      float haus_value    = haus_energy * vPrice;
+      float haus_value  = haus_energy * vPrice;
 
       // ---- Formatstrings für Leistungen ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
-           sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20];
+           sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20],
+           sHeizen[20], sKochen[20], sWaschen[20];
 
-      fmt_power(sHaus, vHaus);
-      fmt_power(sPV,   vPV);
-      fmt_power(sHeat, vHeat);
-      fmt_power(sEQA,  vEQA);
-      fmt_power(sBezug, vBezug);
-      fmt_power(sEins,  vEinspeisung);
+      fmt_power(sHaus,    vHaus);
+      fmt_power(sPV,      vPV);
+      fmt_power(sHeat,    vHeat);
+      fmt_power(sEQA,     vEQA);
+      fmt_power(sBezug,   vBezug);
+      fmt_power(sEins,    vEinspeisung);
       fmt_power(sBatMinusStr, vBatMinus);
       fmt_power(sBatPlusStr,  vBatPlus);
+      fmt_power(sHeizen,  vHeizen);
+      fmt_power(sKochen,  vKochen);
+      fmt_power(sWaschen, vWaschen);
 
       const int screen_w = 800;
       const int cw_big   = 18;  // myFont Breite grob
@@ -387,8 +433,8 @@ display:
         else
           sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € (eine Zeile) – kWh mit 1 Nachkommastelle, Euro davor
-        char buf[64], ebuf[24];
+        // Energie + € – kWh mit 1 Nachkommastelle, € davor
+        char buf[48], ebuf[24];
         std::string pv_today_str;
         std::string bez_today_str;
         std::string bat_today_str;
@@ -425,14 +471,14 @@ display:
         draw_inflow(lblBatterieIn, bat_full, bat_today_str);
       }
 
-      // Trenner (dünner: 3 px)
+      // Trenner
       it.filled_rectangle(10,130,780,3);
 
       // ----------------------------------------------------
-      // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
-      //   Oben: Haus, Heizstab, EQA
-      //   Unten: Warmwasser, Batterie, Export
-      //   Verbraucher-"Batterie" nutzt battery_charge_today
+      // VERBRAUCHER – 3 Reihen à 3
+      //   Reihe 1: Haus, Heizstab, EQA
+      //   Reihe 2: Warmwasser, Batterie, Export
+      //   Reihe 3: Heizen, Kochen, Waschen
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -441,41 +487,54 @@ display:
       sprintf(ww_full,   "%d °C", vWW);
 
       char batp_full[32], eins_full[32];
-
+      sprintf(batp_full, "%s", sBatPlusStr);
       if (vBatPlus > 0)
         sprintf(batp_full, "%s %d%%", sBatPlusStr, batplus_pct);
-      else
-        sprintf(batp_full, "%s", sBatPlusStr);
 
+      sprintf(eins_full, "%s", sEins);
       if (vEinspeisung > 0)
         sprintf(eins_full, "%s %d%%", sEins, grid_pct);
-      else
-        sprintf(eins_full, "%s", sEins);
+
+      char heizen_full[32], kochen_full[32], waschen_full[32];
+      sprintf(heizen_full, "%s", sHeizen);
+      sprintf(kochen_full, "%s", sKochen);
+      sprintf(waschen_full, "%s", sWaschen);
 
       // Verbraucher-Anteile (ohne Warmwasser)
-      int pHausC = (vHaus      > 0) ? vHaus      : 0;
-      int pHeatC = (vHeat      > 0) ? vHeat      : 0;
-      int pEQAC  = (vEQA       > 0) ? vEQA       : 0;
-      int pBatC  = (vBatPlus   > 0) ? vBatPlus   : 0;
-      int pEinsC = (vEinspeisung > 0) ? vEinspeisung : 0;
+      int pHausC    = (vHaus      > 0) ? vHaus      : 0;
+      int pHeatC    = (vHeat      > 0) ? vHeat      : 0;
+      int pEQAC     = (vEQA       > 0) ? vEQA       : 0;
+      int pBatC     = (vBatPlus   > 0) ? vBatPlus   : 0;
+      int pEinsC    = (vEinspeisung > 0) ? vEinspeisung : 0;
+      int pHeizenC  = (vHeizen    > 0) ? vHeizen    : 0;
+      int pKochenC  = (vKochen    > 0) ? vKochen    : 0;
+      int pWaschenC = (vWaschen   > 0) ? vWaschen   : 0;
 
-      int totalCons = pHausC + pHeatC + pEQAC + pBatC + pEinsC;
+      int totalCons = pHausC + pHeatC + pEQAC + pBatC + pEinsC
+                      + pHeizenC + pKochenC + pWaschenC;
 
-      int shareHaus = 0, shareHeat = 0, shareEQA = 0, shareBatC = 0, shareEins = 0;
+      int shareHaus=0, shareHeat=0, shareEQA=0, shareBatC=0,
+          shareEins=0, shareHeizen=0, shareKochen=0, shareWaschen=0;
       if (totalCons > 0) {
-        shareHaus = (int) lroundf(pHausC * 100.0f / totalCons);
-        shareHeat = (int) lroundf(pHeatC * 100.0f / totalCons);
-        shareEQA  = (int) lroundf(pEQAC  * 100.0f / totalCons);
-        shareBatC = (int) lroundf(pBatC  * 100.0f / totalCons);
-        shareEins = (int) lroundf(pEinsC * 100.0f / totalCons);
+        shareHaus    = (int) lroundf(pHausC    * 100.0f / totalCons);
+        shareHeat    = (int) lroundf(pHeatC    * 100.0f / totalCons);
+        shareEQA     = (int) lroundf(pEQAC     * 100.0f / totalCons);
+        shareBatC    = (int) lroundf(pBatC     * 100.0f / totalCons);
+        shareEins    = (int) lroundf(pEinsC    * 100.0f / totalCons);
+        shareHeizen  = (int) lroundf(pHeizenC  * 100.0f / totalCons);
+        shareKochen  = (int) lroundf(pKochenC  * 100.0f / totalCons);
+        shareWaschen = (int) lroundf(pWaschenC * 100.0f / totalCons);
       }
 
       int consumer_count =
-          (pHausC  > 0 ? 1 : 0) +
-          (pHeatC  > 0 ? 1 : 0) +
-          (pEQAC   > 0 ? 1 : 0) +
-          (pBatC   > 0 ? 1 : 0) +
-          (pEinsC  > 0 ? 1 : 0);
+          (pHausC   > 0 ? 1 : 0) +
+          (pHeatC   > 0 ? 1 : 0) +
+          (pEQAC    > 0 ? 1 : 0) +
+          (pBatC    > 0 ? 1 : 0) +
+          (pEinsC   > 0 ? 1 : 0) +
+          (pHeizenC > 0 ? 1 : 0) +
+          (pKochenC > 0 ? 1 : 0) +
+          (pWaschenC> 0 ? 1 : 0);
 
       // Labels für Verbraucher
       char lblHaus[32]       = "Haus";
@@ -484,18 +543,19 @@ display:
       char lblWW[32]         = "Warmwasser";
       char lblBatVerbr[32]   = "Batterie";
       char lblExport[32]     = "Export";
+      char lblHeizen[32]     = "Heizen";
+      char lblKochen[32]     = "Kochen";
+      char lblWaschen[32]    = "Waschen";
 
       if (totalCons > 0 && consumer_count > 1) {
-        if (shareHaus > 0)
-          sprintf(lblHaus, "Haus %d%%", shareHaus);
-        if (shareHeat > 0)
-          sprintf(lblHeiz, "Heizstab %d%%", shareHeat);
-        if (shareEQA > 0)
-          sprintf(lblEQA, "EQA %d%%", shareEQA);
-        if (shareBatC > 0)
-          sprintf(lblBatVerbr, "Batterie %d%%", shareBatC);
-        if (shareEins > 0)
-          sprintf(lblExport, "Export %d%%", shareEins);
+        if (shareHaus    > 0) sprintf(lblHaus,    "Haus %d%%",       shareHaus);
+        if (shareHeat    > 0) sprintf(lblHeiz,    "Heizstab %d%%",   shareHeat);
+        if (shareEQA     > 0) sprintf(lblEQA,     "EQA %d%%",        shareEQA);
+        if (shareBatC    > 0) sprintf(lblBatVerbr,"Batterie %d%%",   shareBatC);
+        if (shareEins    > 0) sprintf(lblExport,  "Export %d%%",     shareEins);
+        if (shareHeizen  > 0) sprintf(lblHeizen,  "Heizen %d%%",     shareHeizen);
+        if (shareKochen  > 0) sprintf(lblKochen,  "Kochen %d%%",     shareKochen);
+        if (shareWaschen > 0) sprintf(lblWaschen, "Waschen %d%%",    shareWaschen);
       }
 
       // Energie/EUR für Verbraucher
@@ -510,6 +570,12 @@ display:
       float eins_energy   = vEinsEnergyToday;
       // Fester Einspeisepreis 0,0794 €/kWh
       float eins_value    = vEinsEnergyToday * 0.0794f;
+      float heizen_energy = vHeizenEnergyToday;
+      float heizen_value  = vHeizenEnergyToday * vPrice;
+      float kochen_energy = vKochenEnergyToday;
+      float kochen_value  = vKochenEnergyToday * vPrice;
+      float waschen_energy= vWaschenEnergyToday;
+      float waschen_value = vWaschenEnergyToday * vPrice;
 
       struct Item {
         const char* label;
@@ -518,16 +584,19 @@ display:
         float value_eur;
       };
 
-      // Feste Reihen:
       // 0: Haus, 1: Heizstab, 2: EQA
       // 3: Warmwasser, 4: Batterie, 5: Export
-      Item items[6] = {
-        { lblHaus,     sHaus,      haus_energy,  haus_value     },
-        { lblHeiz,     heat_full,  heat_energy,  heat_value     },
-        { lblEQA,      eqa_full,   eqa_energy,   eqa_value      },
-        { lblWW,       ww_full,    ww_energy,    ww_value       },
-        { lblBatVerbr, batp_full,  batc_energy,  batc_value     },
-        { lblExport,   eins_full,  eins_energy,  eins_value     }
+      // 6: Heizen, 7: Kochen, 8: Waschen
+      Item items[9] = {
+        { lblHaus,     sHaus,        haus_energy,    haus_value     },
+        { lblHeiz,     heat_full,    heat_energy,    heat_value     },
+        { lblEQA,      eqa_full,     eqa_energy,     eqa_value      },
+        { lblWW,       ww_full,      ww_energy,      ww_value       },
+        { lblBatVerbr, batp_full,    batc_energy,    batc_value     },
+        { lblExport,   eins_full,    eins_energy,    eins_value     },
+        { lblHeizen,   heizen_full,  heizen_energy,  heizen_value   },
+        { lblKochen,   kochen_full,  kochen_energy,  kochen_value   },
+        { lblWaschen,  waschen_full, waschen_energy, waschen_value  }
       };
 
       auto draw_row_fixed = [&](int start_index, int count,
@@ -545,7 +614,7 @@ display:
           it.printf(cx - val_px/2, yV, id(myFont),   "%s", it_item.value);
 
           if (it_item.energy_kwh > 0.0f) {
-            char eb[64], ebuf2[24];
+            char eb[48], ebuf2[24];
             fmt_energy(ebuf2, it_item.energy_kwh);
             sprintf(eb, "%s €%.2f", ebuf2, it_item.value_eur);
             std::string es = eb;
@@ -555,16 +624,18 @@ display:
         }
       };
 
-      // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
-      draw_row_fixed(0, 3, 160, 190, 230);
-
-      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Export
-      draw_row_fixed(3, 3, 280, 310, 350);
+      // Neue, etwas enger gesetzte Reihen
+      // Reihe 1
+      draw_row_fixed(0, 3, 145, 170, 195);
+      // Reihe 2
+      draw_row_fixed(3, 3, 215, 240, 265);
+      // Reihe 3
+      draw_row_fixed(6, 3, 285, 310, 335);
 
       // ----------------------------------------------------
       // SOC-BALKEN
       // ----------------------------------------------------
-      const int bx=50, by=440, bw=700, bh=20;
+      const int bx=50, by=430, bw=700, bh=20;
 
       char sSoc[64];
       if (!sZeit.empty() && sZeit!="unknown" && sZeit!="unavailable"){
