@@ -1,13 +1,13 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.51
-#  Änderungen ggü. 1.50:
-#    - Zeilenabstände im Verbraucherblock an Zuflussblock angepasst
-#      (Label→Leistung = 30 px, Leistung→Energie = 40 px)
-#    - Reihenfolge Verbraucher:
-#        Reihe 1: Haus, Heizstab, EQA
-#        Reihe 2: Heizen, Kochen, Waschen
-#        Reihe 3: Warmwasser, Batterie, Export
+#  Version: 1.52
+#  Änderungen ggü. 1.51:
+#    - Zufluss-Block (Solar/Netz/Batterie) 10 px nach oben verschoben
+#    - Trenner-Linie zwischen Zufluss- und Verbraucher-Block 10 px nach oben
+#    - Verbraucher-Block:
+#        * alle Elemente effektiv ~20 px nach oben
+#        * vertikaler Abstand der drei Verbrauchergruppen (Reihen) = 100 px
+#          (Label: 125 / 225 / 325; Leistung jeweils +30; Energie jeweils +40)
 # --------------------------------------------------------------------
 
 esphome:
@@ -370,6 +370,8 @@ display:
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netz / Batterie)
+      //   Komplett 10 px nach oben verschoben:
+      //   Label: 0, Leistung: 30, Energie/€: 70
       // ----------------------------------------------------
       int pSolar = (vPV       > 0) ? vPV       : 0;
       int pBezug = (vBezug    > 0) ? vBezug    : 0;
@@ -394,9 +396,9 @@ display:
         int seg_w = screen_w / inflow_count;
         int idx   = 0;
 
-        const int yLabel  = 10;
-        const int yPower  = 40;  // Label +30
-        const int yExtra  = 80;  // Power +40
+        const int yLabel  = 0;   // vorher 10
+        const int yPower  = 30;  // vorher 40
+        const int yExtra  = 70;  // vorher 80
 
         auto draw_inflow = [&](const char* label,
                                const char* value,
@@ -471,12 +473,12 @@ display:
         draw_inflow(lblBatterieIn, bat_full, bat_today_str);
       }
 
-      // Trenner
-      it.filled_rectangle(10,130,780,3);
+      // Trenner – 10 px nach oben verschoben (130 -> 120)
+      it.filled_rectangle(10,120,780,3);
 
       // ----------------------------------------------------
       // VERBRAUCHER – 3 Reihen à 3
-      //  Reihen jetzt:
+      //  Reihen:
       //   1: Haus, Heizstab, EQA
       //   2: Heizen, Kochen, Waschen
       //   3: Warmwasser, Batterie, Export
@@ -484,6 +486,10 @@ display:
       //  Zeilenabstände wie Zuflussblock:
       //    Label → Leistung: 30 px
       //    Leistung → Energie: 40 px
+      //  Reihenabstand (Label zu Label): 100 px
+      //    Reihe 1: Label 125, Value 155, Energy 195
+      //    Reihe 2: Label 225, Value 255, Energy 295
+      //    Reihe 3: Label 325, Value 355, Energy 395
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32];
       char ww_full[32];
@@ -607,9 +613,10 @@ display:
 
       // Y-Positionen mit Abständen wie im Zuflussblock:
       // Label → Leistung: 30 px, Leistung → Energie: 40 px
-      // Reihe 1: Label 145, Value 175, Energy 215
-      // Reihe 2: Label 235, Value 265, Energy 305
-      // Reihe 3: Label 325, Value 355, Energy 395
+      // Reihenabstand: 100 px
+      // Reihe 1: 125 / 155 / 195
+      // Reihe 2: 225 / 255 / 295
+      // Reihe 3: 325 / 355 / 395
       auto draw_row_fixed = [&](int start_index, int count,
                                 int yL, int yV, int yE) {
         int seg_w = screen_w / count;
@@ -639,12 +646,12 @@ display:
       };
 
       // Reihen zeichnen
-      draw_row_fixed(0, 3, 145, 175, 215);
-      draw_row_fixed(3, 3, 235, 265, 305);
+      draw_row_fixed(0, 3, 125, 155, 195);
+      draw_row_fixed(3, 3, 225, 255, 295);
       draw_row_fixed(6, 3, 325, 355, 395);
 
       // ----------------------------------------------------
-      // SOC-BALKEN – Label linksbündig, 5 px näher am Balken
+      // SOC-BALKEN – bleibt unverändert
       // ----------------------------------------------------
       const int bx=50, by=440, bw=700, bh=20;
 
@@ -663,7 +670,7 @@ display:
         sprintf(sSoc,"Batterie: %d%%", vSOC);
       }
 
-      // linksbündig am Balken, 5 px näher (by-35 statt by-40)
+      // linksbündig am Balken, 5 px näher (by-35)
       it.printf(bx, by-35, id(tinyFont), "%s", sSoc);
 
       it.rectangle(bx,by,bw,bh);
