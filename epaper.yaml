@@ -1,9 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.49
-#  Änderungen ggü. 1.48:
-#    - Energie- und Eurowerte im Verbraucherblock werden immer angezeigt
-#      (auch bei 0.0 kWh €0.00, keine Ausblendung mehr)
+#  Version: 1.50
+#  Änderungen ggü. 1.49:
+#    - Warmwasser: keine kWh-/€-Zeile mehr
+#    - Positionen Warmwasser ↔ Heizen getauscht
+#      (Heizen mittlere Reihe links, Warmwasser untere Reihe links)
+#    - SOC-Label (Batterie: xx%) linksbündig am Balken und 5 px näher dran
 # --------------------------------------------------------------------
 
 esphome:
@@ -125,7 +127,7 @@ text_sensor:
     id: Strompreis
     internal: true
 
-  # Neue Verbraucher: Heizen, Kochen, Waschen (Leistung + Energie)
+  # Heizen / Kochen / Waschen
   - platform: homeassistant
     entity_id: sensor.total_power_label_heizen
     id: HeizenPwr
@@ -472,12 +474,14 @@ display:
 
       // ----------------------------------------------------
       // VERBRAUCHER – 3 Reihen à 3
-      //   Reihe 1: Haus, Heizstab, EQA
-      //   Reihe 2: Warmwasser, Batterie, Export
-      //   Reihe 3: Heizen, Kochen, Waschen
-      //   Layout wie 1.48, aber Energiezeile wird jetzt immer gezeichnet
+      //  Reihen jetzt:
+      //   1: Haus, Heizstab, EQA
+      //   2: Heizen, Batterie, Export
+      //   3: Warmwasser, Kochen, Waschen
+      //  Warmwasser ohne kWh-/€-Zeile
       // ----------------------------------------------------
-      char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
+      char h_full[32], heat_full[32], eqa_full[32];
+      char ww_full[32];
       sprintf(h_full,    "%s", sHaus);
       sprintf(heat_full, "%s %d%%", sHeat, heat_pct);
       sprintf(eqa_full,  "%s", sEQA);
@@ -560,13 +564,12 @@ display:
       float heat_value    = vHeatToday * vPrice;
       float eqa_energy    = vEQAEnergyToday;
       float eqa_value     = vEQAEnergyToday * vPrice;
-      float ww_energy     = 0.0f;
+      float ww_energy     = 0.0f;   // wird nicht dargestellt
       float ww_value      = 0.0f;
-      float batc_energy   = vBatChgToday;           // Charge
+      float batc_energy   = vBatChgToday;
       float batc_value    = vBatChgToday * vPrice;
       float eins_energy   = vEinsEnergyToday;
-      // Fester Einspeisepreis 0,0794 €/kWh
-      float eins_value    = vEinsEnergyToday * 0.0794f;
+      float eins_value    = vEinsEnergyToday * 0.0794f; // fester Einspeisepreis
       float heizen_energy = vHeizenEnergyToday;
       float heizen_value  = vHeizenEnergyToday * vPrice;
       float kochen_energy = vKochenEnergyToday;
@@ -581,22 +584,23 @@ display:
         float value_eur;
       };
 
+      // Mapping der 9 Elemente (Reihenfolge wie oben beschrieben):
       // 0: Haus, 1: Heizstab, 2: EQA
-      // 3: Warmwasser, 4: Batterie, 5: Export
-      // 6: Heizen, 7: Kochen, 8: Waschen
+      // 3: Heizen, 4: Batterie, 5: Export
+      // 6: Warmwasser, 7: Kochen, 8: Waschen
       Item items[9] = {
         { lblHaus,     sHaus,        haus_energy,    haus_value     },
         { lblHeiz,     heat_full,    heat_energy,    heat_value     },
         { lblEQA,      eqa_full,     eqa_energy,     eqa_value      },
-        { lblWW,       ww_full,      ww_energy,      ww_value       },
+        { lblHeizen,   heizen_full,  heizen_energy,  heizen_value   },
         { lblBatVerbr, batp_full,    batc_energy,    batc_value     },
         { lblExport,   eins_full,    eins_energy,    eins_value     },
-        { lblHeizen,   heizen_full,  heizen_energy,  heizen_value   },
+        { lblWW,       ww_full,      ww_energy,      ww_value       },
         { lblKochen,   kochen_full,  kochen_energy,  kochen_value   },
         { lblWaschen,  waschen_full, waschen_energy, waschen_value  }
       };
 
-      // Angepasste Y-Positionen:
+      // Y-Positionen:
       // Reihe 1: Label 145, Value 170, Energy 205
       // Reihe 2: Label 235, Value 260, Energy 295
       // Reihe 3: Label 325, Value 350, Energy 385
@@ -614,7 +618,11 @@ display:
           it.printf(cx - lbl_px/2, yL, id(tinyFont), "%s", it_item.label);
           it.printf(cx - val_px/2, yV, id(myFont),   "%s", it_item.value);
 
-          // NEU in 1.49: Energie/Euro immer zeichnen, auch bei 0.0
+          // Warmwasser: keine kWh-/€-Zeile
+          if (lbl_str.rfind("Warmwasser", 0) == 0) {
+            continue;
+          }
+
           char eb[48], ebuf2[24];
           fmt_energy(ebuf2, it_item.energy_kwh);
           sprintf(eb, "%s €%.2f", ebuf2, it_item.value_eur);
@@ -624,13 +632,13 @@ display:
         }
       };
 
-      // Reihen zeichnen mit vergrößertem vertikalen Abstand
+      // Reihen zeichnen
       draw_row_fixed(0, 3, 145, 170, 205);
       draw_row_fixed(3, 3, 235, 260, 295);
       draw_row_fixed(6, 3, 325, 350, 385);
 
       // ----------------------------------------------------
-      // SOC-BALKEN (10 px nach unten verschoben)
+      // SOC-BALKEN – Label linksbündig, 5 px näher am Balken
       // ----------------------------------------------------
       const int bx=50, by=440, bw=700, bh=20;
 
@@ -649,10 +657,8 @@ display:
         sprintf(sSoc,"Batterie: %d%%", vSOC);
       }
 
-      std::string soc_str = sSoc;
-      int soc_px = tiny_text_width(soc_str);
-      int soc_x  = bx + bw/2 - soc_px/2;
-      it.printf(soc_x, by-40, id(tinyFont), "%s", sSoc);
+      // linksbündig am Balken, 5 px näher (by-35 statt by-40)
+      it.printf(bx, by-35, id(tinyFont), "%s", sSoc);
 
       it.rectangle(bx,by,bw,bh);
 
