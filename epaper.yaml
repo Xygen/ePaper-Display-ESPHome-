@@ -1,13 +1,17 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.52
-#  Änderungen ggü. 1.51:
-#    - Zufluss-Block (Solar/Netz/Batterie) 10 px nach oben verschoben
-#    - Trenner-Linie zwischen Zufluss- und Verbraucher-Block 10 px nach oben
-#    - Verbraucher-Block:
-#        * alle Elemente effektiv ~20 px nach oben
-#        * vertikaler Abstand der drei Verbrauchergruppen (Reihen) = 100 px
-#          (Label: 125 / 225 / 325; Leistung jeweils +30; Energie jeweils +40)
+#  Version: 1.53
+#  Änderungen ggü. 1.52:
+#    - Trenner zwischen Zufluss- und Verbraucherblock ersetzt durch
+#      drei Linien, deren Länge den Leistungsanteil von Solar, Netz
+#      und Batterie visualisiert:
+#        * Solar: linksbündig im linken Drittel
+#        * Netz: zentriert im mittleren Drittel
+#        * Batterie: rechtsbündig im rechten Drittel
+#    - Positionen der Verbraucherreihen:
+#        draw_row_fixed(0, 3, 120, 150, 190);
+#        draw_row_fixed(3, 3, 225, 255, 295);
+#        draw_row_fixed(6, 3, 330, 360, 400);
 # --------------------------------------------------------------------
 
 esphome:
@@ -370,8 +374,10 @@ display:
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netz / Batterie)
-      //   Komplett 10 px nach oben verschoben:
-      //   Label: 0, Leistung: 30, Energie/€: 70
+      //   Label / Power / kWh/€:
+      //     Label:  0
+      //     Power: 30
+      //     Extra: 70
       // ----------------------------------------------------
       int pSolar = (vPV       > 0) ? vPV       : 0;
       int pBezug = (vBezug    > 0) ? vBezug    : 0;
@@ -396,9 +402,9 @@ display:
         int seg_w = screen_w / inflow_count;
         int idx   = 0;
 
-        const int yLabel  = 0;   // vorher 10
-        const int yPower  = 30;  // vorher 40
-        const int yExtra  = 70;  // vorher 80
+        const int yLabel  = 0;
+        const int yPower  = 30;
+        const int yExtra  = 70;
 
         auto draw_inflow = [&](const char* label,
                                const char* value,
@@ -473,8 +479,51 @@ display:
         draw_inflow(lblBatterieIn, bat_full, bat_today_str);
       }
 
-      // Trenner – 10 px nach oben verschoben (130 -> 120)
-      it.filled_rectangle(10,120,780,3);
+      // ----------------------------------------------------
+      // NEUE VISUALISIERUNG: 3 Linien auf Höhe des alten Trenners
+      //  - Solar:  linksbündig im linken Drittel
+      //  - Netz:   zentriert im mittleren Drittel
+      //  - Batterie: rechtsbündig im rechten Drittel
+      //  Länge proportional zur Leistung (pSolar/pBezug/pBatIn)
+      //  y = 110, Gesamtbreite 780 (x=10..790), max. Segmentbreite = 780/3
+      // ----------------------------------------------------
+      {
+        const int base_x = 10;
+        const int total_w = 780;
+        const int seg_w = total_w / 3;  // max. Zeilenlänge je Quelle
+        const int y_line = 110;
+        int total = pSolar + pBezug + pBatIn;
+        if (total < 1) total = 1;
+
+        auto line_len = [&](int value) -> int {
+          if (value <= 0) return 0;
+          return (int) lroundf(seg_w * (float)value / (float)total);
+        };
+
+        int lenSolar = line_len(pSolar);
+        int lenNetz  = line_len(pBezug);
+        int lenBat   = line_len(pBatIn);
+
+        // Solar: linksbündig im linken Drittel
+        if (lenSolar > 0) {
+          int xS = base_x;
+          it.filled_rectangle(xS, y_line, lenSolar, 3);
+        }
+
+        // Netz: zentriert im mittleren Drittel
+        if (lenNetz > 0) {
+          int midNet = base_x + total_w/2;
+          int xN = midNet - lenNetz/2;
+          it.filled_rectangle(xN, y_line, lenNetz, 3);
+        }
+
+        // Batterie: rechtsbündig im rechten Drittel
+        if (lenBat > 0) {
+          int rightBat = base_x + total_w;
+          int xB = rightBat - lenBat;
+          it.filled_rectangle(xB, y_line, lenBat, 3);
+        }
+      }
 
       // ----------------------------------------------------
       // VERBRAUCHER – 3 Reihen à 3
@@ -486,10 +535,10 @@ display:
       //  Zeilenabstände wie Zuflussblock:
       //    Label → Leistung: 30 px
       //    Leistung → Energie: 40 px
-      //  Reihenabstand (Label zu Label): 100 px
-      //    Reihe 1: Label 125, Value 155, Energy 195
-      //    Reihe 2: Label 225, Value 255, Energy 295
-      //    Reihe 3: Label 325, Value 355, Energy 395
+      //  Reihenpositionen (wie von dir gestellt):
+      //    Reihe 1: 120 / 150 / 190
+      //    Reihe 2: 225 / 255 / 295
+      //    Reihe 3: 330 / 360 / 400
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32];
       char ww_full[32];
@@ -611,12 +660,7 @@ display:
         { lblExport,   eins_full,    eins_energy,    eins_value     }
       };
 
-      // Y-Positionen mit Abständen wie im Zuflussblock:
-      // Label → Leistung: 30 px, Leistung → Energie: 40 px
-      // Reihenabstand: 100 px
-      // Reihe 1: 125 / 155 / 195
-      // Reihe 2: 225 / 255 / 295
-      // Reihe 3: 325 / 355 / 395
+      // Reihen-Rendering mit deinen Koordinaten
       auto draw_row_fixed = [&](int start_index, int count,
                                 int yL, int yV, int yE) {
         int seg_w = screen_w / count;
@@ -645,13 +689,12 @@ display:
         }
       };
 
-      // Reihen zeichnen
-      draw_row_fixed(0, 3, 125, 155, 195);
+      draw_row_fixed(0, 3, 120, 150, 190);
       draw_row_fixed(3, 3, 225, 255, 295);
-      draw_row_fixed(6, 3, 325, 355, 395);
+      draw_row_fixed(6, 3, 330, 360, 400);
 
       // ----------------------------------------------------
-      // SOC-BALKEN – bleibt unverändert
+      // SOC-BALKEN
       // ----------------------------------------------------
       const int bx=50, by=440, bw=700, bh=20;
 
