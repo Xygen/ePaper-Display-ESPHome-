@@ -1,11 +1,13 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.50
-#  Änderungen ggü. 1.49:
-#    - Warmwasser: keine kWh-/€-Zeile mehr
-#    - Positionen Warmwasser ↔ Heizen getauscht
-#      (Heizen mittlere Reihe links, Warmwasser untere Reihe links)
-#    - SOC-Label (Batterie: xx%) linksbündig am Balken und 5 px näher dran
+#  Version: 1.51
+#  Änderungen ggü. 1.50:
+#    - Zeilenabstände im Verbraucherblock an Zuflussblock angepasst
+#      (Label→Leistung = 30 px, Leistung→Energie = 40 px)
+#    - Reihenfolge Verbraucher:
+#        Reihe 1: Haus, Heizstab, EQA
+#        Reihe 2: Heizen, Kochen, Waschen
+#        Reihe 3: Warmwasser, Batterie, Export
 # --------------------------------------------------------------------
 
 esphome:
@@ -476,9 +478,12 @@ display:
       // VERBRAUCHER – 3 Reihen à 3
       //  Reihen jetzt:
       //   1: Haus, Heizstab, EQA
-      //   2: Heizen, Batterie, Export
-      //   3: Warmwasser, Kochen, Waschen
+      //   2: Heizen, Kochen, Waschen
+      //   3: Warmwasser, Batterie, Export
       //  Warmwasser ohne kWh-/€-Zeile
+      //  Zeilenabstände wie Zuflussblock:
+      //    Label → Leistung: 30 px
+      //    Leistung → Energie: 40 px
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32];
       char ww_full[32];
@@ -586,24 +591,25 @@ display:
 
       // Mapping der 9 Elemente (Reihenfolge wie oben beschrieben):
       // 0: Haus, 1: Heizstab, 2: EQA
-      // 3: Heizen, 4: Batterie, 5: Export
-      // 6: Warmwasser, 7: Kochen, 8: Waschen
+      // 3: Heizen, 4: Kochen, 5: Waschen
+      // 6: Warmwasser, 7: Batterie, 8: Export
       Item items[9] = {
         { lblHaus,     sHaus,        haus_energy,    haus_value     },
         { lblHeiz,     heat_full,    heat_energy,    heat_value     },
         { lblEQA,      eqa_full,     eqa_energy,     eqa_value      },
         { lblHeizen,   heizen_full,  heizen_energy,  heizen_value   },
-        { lblBatVerbr, batp_full,    batc_energy,    batc_value     },
-        { lblExport,   eins_full,    eins_energy,    eins_value     },
-        { lblWW,       ww_full,      ww_energy,      ww_value       },
         { lblKochen,   kochen_full,  kochen_energy,  kochen_value   },
-        { lblWaschen,  waschen_full, waschen_energy, waschen_value  }
+        { lblWaschen,  waschen_full, waschen_energy, waschen_value  },
+        { lblWW,       ww_full,      ww_energy,      ww_value       },
+        { lblBatVerbr, batp_full,    batc_energy,    batc_value     },
+        { lblExport,   eins_full,    eins_energy,    eins_value     }
       };
 
-      // Y-Positionen:
-      // Reihe 1: Label 145, Value 170, Energy 205
-      // Reihe 2: Label 235, Value 260, Energy 295
-      // Reihe 3: Label 325, Value 350, Energy 385
+      // Y-Positionen mit Abständen wie im Zuflussblock:
+      // Label → Leistung: 30 px, Leistung → Energie: 40 px
+      // Reihe 1: Label 145, Value 175, Energy 215
+      // Reihe 2: Label 235, Value 265, Energy 305
+      // Reihe 3: Label 325, Value 355, Energy 395
       auto draw_row_fixed = [&](int start_index, int count,
                                 int yL, int yV, int yE) {
         int seg_w = screen_w / count;
@@ -633,9 +639,9 @@ display:
       };
 
       // Reihen zeichnen
-      draw_row_fixed(0, 3, 145, 170, 205);
-      draw_row_fixed(3, 3, 235, 260, 295);
-      draw_row_fixed(6, 3, 325, 350, 385);
+      draw_row_fixed(0, 3, 145, 175, 215);
+      draw_row_fixed(3, 3, 235, 265, 305);
+      draw_row_fixed(6, 3, 325, 355, 395);
 
       // ----------------------------------------------------
       // SOC-BALKEN – Label linksbündig, 5 px näher am Balken
