@@ -1,12 +1,9 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.40
-#  Änderungen ggü. 1.39:
-#    - Haus-Energie eingebaut:
-#        sensor.powerocean_sysload_energy_today
-#      Haus_Energie = SysLoadEnergyToday - HeizstabEnergyToday - EQAEnergyToday
-#      (nicht negativ werden lassen)
-#    - Haus zeigt nun Energie + Euro-Wert im Verbrauchsblock
+#  Version: 1.41
+#  Änderungen ggü. 1.40:
+#    - Eurowert für Einspeisung verwendet nun festen Preis 0,0794 €/kWh
+#      (statt input_number.strompreis)
 # --------------------------------------------------------------------
 
 esphome:
@@ -370,7 +367,7 @@ display:
         sprintf(bez_full, "%s", sBezug);
         sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € (eine Zeile)
+        // Energie + € (eine Zeile) – Import (Netz) mit dynamischem Strompreis
         char buf[48];
         std::string pv_today_str;
         std::string bez_today_str;
@@ -410,7 +407,6 @@ display:
       // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
       //   Oben: Haus, Heizstab, EQA
       //   Unten: Warmwasser, Batterie, Einspeisung (20 px tiefer)
-      //   Abstände Label/Leistung/Energie wie im Zuflussblock
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -486,7 +482,8 @@ display:
       float batc_energy   = bat_today;
       float batc_value    = bat_value;
       float eins_energy   = vEinsEnergyToday;
-      float eins_value    = vEinsEnergyToday * vPrice;
+      // Fester Einspeisepreis 0,0794 €/kWh
+      float eins_value    = vEinsEnergyToday * 0.0794f;
 
       struct Item {
         const char* label;
@@ -534,11 +531,9 @@ display:
       };
 
       // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
-      //  Label/Leistung/Energie mit Abständen 30/40: 160 -> 190 -> 230
       draw_row_fixed(0, 3, 160, 190, 230);
 
       // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung
-      //  20 px tiefer: 280 -> 310 -> 350
       draw_row_fixed(3, 3, 280, 310, 350);
 
       // ----------------------------------------------------
