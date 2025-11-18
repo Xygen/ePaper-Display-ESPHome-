@@ -1,13 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.47
-#  Änderungen ggü. 1.46:
-#    - Verbraucherblock von 6 auf 9 Elemente erweitert:
-#        Heizen, Kochen, Waschen
-#    - Layout: 3 Reihen à 3 Verbraucher
-#    - Die Leistungswerte Heizen/Kochen/Waschen werden von Haus-Leistung
-#      abgezogen
-#    - Die Energie Heizen/Kochen/Waschen wird von Haus-Energie abgezogen
+#  Version: 1.48
+#  Änderungen ggü. 1.47:
+#    - Vertikaler Abstand zwischen den 9 Verbraucher-Elementen um 20 px erhöht
+#    - SOC-Balken inkl. Label 10 px nach unten verschoben
+#    - Abstand zwischen Leistungszeile und kWh/€-Zeile um 10 px erhöht
 # --------------------------------------------------------------------
 
 esphome:
@@ -479,6 +476,8 @@ display:
       //   Reihe 1: Haus, Heizstab, EQA
       //   Reihe 2: Warmwasser, Batterie, Export
       //   Reihe 3: Heizen, Kochen, Waschen
+      //   -> vertikale Abstände zwischen Reihen um 20 px vergrößert
+      //   -> Power->Energy-Abstand um 10 px vergrößert
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -599,6 +598,10 @@ display:
         { lblWaschen,  waschen_full, waschen_energy, waschen_value  }
       };
 
+      // Angepasste Y-Positionen:
+      // Reihe 1: Label 145, Value 170, Energy 205
+      // Reihe 2: Label 235, Value 260, Energy 295
+      // Reihe 3: Label 325, Value 350, Energy 385
       auto draw_row_fixed = [&](int start_index, int count,
                                 int yL, int yV, int yE) {
         int seg_w = screen_w / count;
@@ -624,18 +627,15 @@ display:
         }
       };
 
-      // Neue, etwas enger gesetzte Reihen
-      // Reihe 1
-      draw_row_fixed(0, 3, 145, 170, 195);
-      // Reihe 2
-      draw_row_fixed(3, 3, 215, 240, 265);
-      // Reihe 3
-      draw_row_fixed(6, 3, 285, 310, 335);
+      // Reihen zeichnen mit vergrößertem Abstand
+      draw_row_fixed(0, 3, 145, 170, 205);
+      draw_row_fixed(3, 3, 235, 260, 295);
+      draw_row_fixed(6, 3, 325, 350, 385);
 
       // ----------------------------------------------------
-      // SOC-BALKEN
+      // SOC-BALKEN (10 px nach unten verschoben)
       // ----------------------------------------------------
-      const int bx=50, by=430, bw=700, bh=20;
+      const int bx=50, by=440, bw=700, bh=20;
 
       char sSoc[64];
       if (!sZeit.empty() && sZeit!="unknown" && sZeit!="unavailable"){
