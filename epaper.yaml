@@ -1,11 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.38
-#  Änderungen ggü. 1.36:
-#    - Heizstab-Energie ergänzt:
-#        sensor.powerocean_heizstab_energy_today
-#      inkl. Euro-Wert im Verbrauchsblock
-#    - TinyFont-LUT (tiny_char_width / tiny_text_width) wieder enthalten
+#  Version: 1.39
+#  Änderungen ggü. 1.38:
+#    - Labels im Verbrauchsblock (Haus, Heizstab, EQA, Warmwasser,
+#      Batterie, Einspeisung) verwenden tinyFont statt myFont
+#    - Energie-/Euro-Zeilen im Verbrauchsblock jeweils 5 Pixel nach
+#      unten verschoben (yE oben 230→235, unten 350→355)
 # --------------------------------------------------------------------
 
 esphome:
@@ -296,7 +296,7 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // myFont (Labels/Werte im Verbraucherblock)
+      const int cw_big   = 18;  // Breite pro Zeichen für myFont (~geschätzt)
 
       // ----------------------------------------------------
       // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
@@ -490,12 +490,12 @@ display:
       // 0: Haus, 1: Heizstab, 2: EQA
       // 3: Warmwasser, 4: Batterie, 5: Einspeisung
       Item items[6] = {
-        { lblHaus,        h_full,    haus_energy,  haus_value     },
-        { lblHeiz,        heat_full, heat_energy,  heat_value     },
-        { lblEQA,         eqa_full,  eqa_energy,   eqa_value      },
-        { lblWW,          ww_full,   ww_energy,    ww_value       },
-        { lblBatVerbr,    batp_full, batc_energy,  batc_value     },
-        { lblEinspeisung, eins_full, eins_energy,  eins_value     }
+        { lblHaus,        sHaus,    haus_energy,  haus_value     },
+        { lblHeiz,        heat_full,heat_energy,  heat_value     },
+        { lblEQA,         eqa_full, eqa_energy,   eqa_value      },
+        { lblWW,          ww_full,  ww_energy,    ww_value       },
+        { lblBatVerbr,    batp_full,batc_energy,  batc_value     },
+        { lblEinspeisung, eins_full,eins_energy,  eins_value     }
       };
 
       auto draw_row_fixed = [&](int start_index, int count,
@@ -505,12 +505,16 @@ display:
           Item &it_item = items[start_index + i];
           int cx = i * seg_w + seg_w / 2;
 
-          int lbl_px = strlen(it_item.label) * cw_big;
-          int val_px = strlen(it_item.value) * cw_big;
+          // Label jetzt mit tinyFont
+          std::string lbl_str(it_item.label);
+          int lbl_px = tiny_text_width(lbl_str);
+          it.printf(cx - lbl_px/2, yL, id(tinyFont), "%s", it_item.label);
 
-          it.printf(cx - lbl_px/2, yL, id(myFont), "%s", it_item.label);
+          // Wert weiter mit myFont
+          int val_px = strlen(it_item.value) * cw_big;
           it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
 
+          // Energie-/Euro-Zeile (tinyFont), 5px nach unten verschoben
           if (it_item.energy_kwh > 0.0f) {
             char eb[48];
             sprintf(eb, "%.1f kWh (%.2f €)", it_item.energy_kwh, it_item.value_eur);
@@ -522,9 +526,11 @@ display:
       };
 
       // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
-      draw_row_fixed(0, 3, 160, 200, 230);
+      // yE: 230 -> 235
+      draw_row_fixed(0, 3, 160, 200, 235);
       // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung – 20px tiefer
-      draw_row_fixed(3, 3, 280, 320, 350);
+      // yE: 350 -> 355
+      draw_row_fixed(3, 3, 280, 320, 355);
 
       // ----------------------------------------------------
       // SOC-BALKEN
