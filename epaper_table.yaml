@@ -1,11 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.8_table
-#  Änderungen ggü. 1.7_table:
-#    - SOC-Balken-Ticks nur noch bei 10..90 % im Balken, keine Ticks bei 0/100
-#    - keine dicken Ticks mehr
-#    - Tabelle: Spalten-X angepasst (xPowerPct=120, xName=150, xPower=380, xEnergy=530, xCost=660, xEnergyPct=750)
-#    - SOC-Balken an unteren Rand verschoben (by=455), Batterie-/Warmwasser-Label folgen
+#  Version: 1.9_table
+#  Änderungen ggü. 1.8_table:
+#    - Heizstab-Energie wird NICHT mehr von der angezeigten Energie
+#      "Heizen" abgezogen.
+#    - Für die Haus-Energie wird weiterhin Heizen ohne Heizstab abgezogen,
+#      damit Heizstab nicht doppelt aus Haus entfernt wird.
 # --------------------------------------------------------------------
 
 esphome:
@@ -239,13 +239,17 @@ display:
       int vBatMinus = (vBat < 0) ? -vBat : 0;
       int vBatPlus  = (vBat > 0) ?  vBat : 0;
 
-      // --- HEIZEN-FIX: Heizen ohne Heizstab ---
+      // --- HEIZEN-FIX: Leistung Heizen ohne Heizstab ---
       int   vHeizenNet = vHeizen - vHeat;
       if (vHeizenNet < 0) vHeizenNet = 0;
 
-      float heizen_energy = vHeizenEnergyToday - vHeatToday;
-      if (heizen_energy < 0.0f) heizen_energy = 0.0f;
-      float heizen_value  = heizen_energy * vPrice;
+      // Energie Heizen:
+      // - Anzeige: volle Heizen-Energie (inkl. Heizstab), wie gewünscht
+      // - Für Haus-Energie: Heizen ohne Heizstab, um Heizstab nicht doppelt abzuziehen
+      float heizen_energy_display = vHeizenEnergyToday;            // für Tabelle "Heizen"
+      float heizen_energy_for_haus = vHeizenEnergyToday - vHeatToday;
+      if (heizen_energy_for_haus < 0.0f) heizen_energy_for_haus = 0.0f;
+      float heizen_value  = heizen_energy_display * vPrice;
 
       // ---- Hausleistung: Heizen bereits bereinigt verwenden ----
       vHaus = vHaus - vHeat - vEQA - vHeizenNet - vKochen - vWaschen;
@@ -286,7 +290,7 @@ display:
       float haus_energy = vHausEnergyToday
                           - vHeatToday
                           - vEQAEnergyToday
-                          - heizen_energy
+                          - heizen_energy_for_haus   // Heizen ohne Heizstab
                           - vKochenEnergyToday
                           - vWaschenEnergyToday;
       if (haus_energy < 0.0f) haus_energy = 0.0f;
@@ -310,7 +314,7 @@ display:
       fmt_power(sEins,    vEinspeisung);
       fmt_power(sBatMinusStr, vBatMinus);
       fmt_power(sBatPlusStr,  vBatPlus);
-      fmt_power(sHeizenStr,   vHeizenNet);   // Heizen = ohne Heizstab
+      fmt_power(sHeizenStr,   vHeizenNet);   // Heizen (Leistung) = ohne Heizstab
       fmt_power(sKochen,  vKochen);
       fmt_power(sWaschen, vWaschen);
 
@@ -409,7 +413,7 @@ display:
         draw_inflow(lblBatterieIn, bat_full, bat_today_str);
       }
 
-      // 3 Linien unter dem Zuflussblock (unverändert)
+      // 3 Linien unter dem Zuflussblock
       {
         const int base_x = 10;
         const int total_w = 780;
@@ -471,7 +475,7 @@ display:
 
       float totalConsE = haus_energy + heat_energy + eqa_energy +
                          batc_energy + eins_energy +
-                         heizen_energy + kochen_energy + waschen_energy;
+                         heizen_energy_display + kochen_energy + waschen_energy;
 
       Row rows[8];
       int n_rows = 0;
@@ -489,14 +493,14 @@ display:
       };
 
       // Warmwasser explizit NICHT in der Tabelle
-      add_row("Haus",     vHaus,      haus_energy,    haus_value);
-      add_row("Heizstab", vHeat,      heat_energy,    heat_value);
-      add_row("EQA",      vEQA,       eqa_energy,     eqa_value);
-      add_row("Heizen",   vHeizenNet, heizen_energy,  heizen_value);
-      add_row("Kochen",   vKochen,    kochen_energy,  kochen_value);
-      add_row("Waschen",  vWaschen,   waschen_energy, waschen_value);
-      add_row("Batterie", vBatPlus,   batc_energy,    batc_value);
-      add_row("Export",   vEinspeisung, eins_energy,  eins_value);
+      add_row("Haus",     vHaus,      haus_energy,          haus_value);
+      add_row("Heizstab", vHeat,      heat_energy,          heat_value);
+      add_row("EQA",      vEQA,       eqa_energy,           eqa_value);
+      add_row("Heizen",   vHeizenNet, heizen_energy_display, heizen_value);
+      add_row("Kochen",   vKochen,    kochen_energy,        kochen_value);
+      add_row("Waschen",  vWaschen,   waschen_energy,       waschen_value);
+      add_row("Batterie", vBatPlus,   batc_energy,          batc_value);
+      add_row("Export",   vEinspeisung, eins_energy,        eins_value);
 
       if (totalConsP > 0) {
         for (int i = 0; i < n_rows; i++) {
@@ -523,7 +527,7 @@ display:
         }
       }
 
-      // Tabelle: Koordinaten (angepasst)
+      // Tabelle: Koordinaten
       const int xPowerPct  = 120;
       const int xName      = 150;
       const int xPower     = 380;
