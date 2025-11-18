@@ -1,10 +1,9 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.45
-#  Änderungen ggü. 1.44:
-#    - Zufluss-Batterie (oben) zeigt jetzt Leistungs-Prozentwert
-#      (100 % entsprechen 6600 W, z.B. "690 W 10%")
-#    - Verbraucher-Label "Einspeisung" in "Export" umbenannt
+#  Version: 1.46
+#  Änderungen ggü. 1.45:
+#    - Alle kWh-Werte werden mit genau 1 Nachkommastelle angezeigt
+#    - Euro-Beträge werden als "kWh €4.77" ausgegeben (Eurozeichen vor Zahl)
 # --------------------------------------------------------------------
 
 esphome:
@@ -174,17 +173,10 @@ display:
 
       auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
 
-      // kWh dynamisch:
-      //  x.0 kWh  -> "x kWh"
-      //  sonst    -> "x.xx kWh"
+      // kWh jetzt immer mit genau 1 Nachkommastelle
       auto fmt_energy = [](char *buf, float kwh) {
-        float rounded = roundf(kwh * 100.0f) / 100.0f;
-        int   as_int  = (int) lroundf(rounded);
-        if (fabsf(rounded - (float)as_int) < 0.005f) {
-          sprintf(buf, "%d kWh", as_int);
-        } else {
-          sprintf(buf, "%.2f kWh", rounded);
-        }
+        float rounded = roundf(kwh * 10.0f) / 10.0f;
+        sprintf(buf, "%.1f kWh", rounded);
       };
 
       // --- Zeichenbreiten-LUT für tinyFont (Inter @ 28) ---
@@ -395,22 +387,22 @@ display:
         else
           sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € (eine Zeile) – ohne Klammern, mit dynamischer kWh
-        char buf[48], ebuf[24];
+        // Energie + € (eine Zeile) – kWh mit 1 Nachkommastelle, Euro davor
+        char buf[64], ebuf[24];
         std::string pv_today_str;
         std::string bez_today_str;
         std::string bat_today_str;
 
         fmt_energy(ebuf, pv_today);
-        sprintf(buf, "%s %.2f €", ebuf, pv_value);
+        sprintf(buf, "%s €%.2f", ebuf, pv_value);
         pv_today_str = buf;
 
         fmt_energy(ebuf, grid_today);
-        sprintf(buf, "%s %.2f €", ebuf, grid_value);
+        sprintf(buf, "%s €%.2f", ebuf, grid_value);
         bez_today_str = buf;
 
         fmt_energy(ebuf, bat_today);
-        sprintf(buf, "%s %.2f €", ebuf, bat_value);
+        sprintf(buf, "%s €%.2f", ebuf, bat_value);
         bat_today_str = buf;
 
         // Labels (mit Prozent nur bei >1 aktivem Zufluss)
@@ -553,9 +545,9 @@ display:
           it.printf(cx - val_px/2, yV, id(myFont),   "%s", it_item.value);
 
           if (it_item.energy_kwh > 0.0f) {
-            char eb[48], ebuf2[24];
+            char eb[64], ebuf2[24];
             fmt_energy(ebuf2, it_item.energy_kwh);
-            sprintf(eb, "%s %.2f €", ebuf2, it_item.value_eur);
+            sprintf(eb, "%s €%.2f", ebuf2, it_item.value_eur);
             std::string es = eb;
             int e_px = tiny_text_width(es);
             it.printf(cx - e_px/2, yE, id(tinyFont), "%s", es.c_str());
