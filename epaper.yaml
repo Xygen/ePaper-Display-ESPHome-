@@ -1,10 +1,12 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.42
-#  Änderungen ggü. 1.41:
-#    - Sämtliche Klammern in Leistungs- und Eurodarstellung entfernt:
-#        "X W (Y%)"      -> "X W Y%"
-#        "X kWh (Y €)"   -> "X kWh Y €"
+#  Version: 1.43
+#  Änderungen ggü. 1.42:
+#    - Verbraucher "Batterie" verwendet jetzt
+#        sensor.powerocean_battery_charge_today
+#      für die Energie-/Euroanzeige
+#    - Zufluss "Batterie" oben nutzt weiterhin
+#        sensor.powerocean_battery_discharge_today
 # --------------------------------------------------------------------
 
 esphome:
@@ -108,6 +110,10 @@ text_sensor:
   - platform: homeassistant
     entity_id: sensor.powerocean_battery_discharge_today
     id: BatDischargeToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_battery_charge_today
+    id: BatChargeToday
     internal: true
   - platform: homeassistant
     entity_id: sensor.iometer_gesamtbezug_today
@@ -220,7 +226,7 @@ display:
           case ':':           return 7;
           case ' ':           return 8;
 
-          default: return 14; // Fallback (inkl. '€' etc.)
+          default: return 14; // Fallback
         }
       };
 
@@ -244,7 +250,8 @@ display:
 
       float vPV1Today        = as_float(id(PV1EnergyToday).state);
       float vPV2Today        = as_float(id(PV2EnergyToday).state);
-      float vBatDisToday     = as_float(id(BatDischargeToday).state);
+      float vBatDisToday     = as_float(id(BatDischargeToday).state); // Entladen (Zufluss)
+      float vBatChgToday     = as_float(id(BatChargeToday).state);    // Laden (Verbrauch)
       float vGridToday       = as_float(id(GridEnergyToday).state);
       float vHeatToday       = as_float(id(HeatEnergyToday).state);
       float vEQAEnergyToday  = as_float(id(EQAEnergyToday).state);
@@ -280,7 +287,7 @@ display:
       float pv_today   = vPV1Today + vPV2Today;
       float pv_value   = pv_today     * vPrice;
 
-      float bat_today  = vBatDisToday;
+      float bat_today  = vBatDisToday;       // Entladung -> Zufluss "Batterie"
       float bat_value  = bat_today    * vPrice;
 
       float grid_today = vGridToday;
@@ -408,6 +415,7 @@ display:
       // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
       //   Oben: Haus, Heizstab, EQA
       //   Unten: Warmwasser, Batterie, Einspeisung (20 px tiefer)
+      //   Verbraucher-"Batterie" nutzt jetzt battery_charge_today
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -480,8 +488,8 @@ display:
       float eqa_value     = vEQAEnergyToday * vPrice;
       float ww_energy     = 0.0f;
       float ww_value      = 0.0f;
-      float batc_energy   = bat_today;
-      float batc_value    = bat_value;
+      float batc_energy   = vBatChgToday;           // jetzt: CHARGE
+      float batc_value    = vBatChgToday * vPrice;  // mit Strompreis
       float eins_energy   = vEinsEnergyToday;
       // Fester Einspeisepreis 0,0794 €/kWh
       float eins_value    = vEinsEnergyToday * 0.0794f;
