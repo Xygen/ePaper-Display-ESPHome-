@@ -1,0 +1,609 @@
+# --------------------------------------------------------------------
+#  ePaper Display – PowerOcean Dashboard
+#  Version: 1.4_table
+#  Änderungen ggü. 1.3_table:
+#    - Zuflussblock (Solar / Netz / Batterie):
+#        * Text zentriert via TextAlign::TOP_CENTER
+#        * tiny_char_width / tiny_text_width entfernt
+#        * keine eigene Breitenberechnung mehr nötig
+#    - Tabelle:
+#        * Spaltenkoordinaten wie vom Nutzer angepasst
+#        * Kosten-Ausgabe: "%.2f €"
+# --------------------------------------------------------------------
+
+esphome:
+  name: epaper
+  friendly_name: ePaper
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: "JpvERJsHgGmgv6zi3tPtTDR7cXTkMIcoAQmbiOCEFxw="
+
+ota:
+  - platform: esphome
+    password: "7c8ebe25a7a6df2e6666c3819e572e2b"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Epaper Fallback Hotspot"
+    password: "hCW8fSx9zqiz"
+
+captive_portal:
+
+font:
+  - file: "gfonts://Inter@600"
+    id: myFont
+    size: 40
+  - file: "gfonts://Inter@700"
+    id: smallFont
+    size: 30
+  - file: "gfonts://Inter@600"
+    id: tinyFont
+    size: 28
+
+text_sensor:
+  - platform: homeassistant
+    entity_id: sensor.powerocean_sysloadpwr
+    id: SysLoadPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_sysgridpwr
+    id: SysGridPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_bppwr
+    id: BatPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_mpptpwr
+    id: PVPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_bpsoc
+    id: BatSOC
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_heizstab_power
+    id: HeatPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.shelly_plug_mercedes_eqa_250_power
+    id: EQAPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.pufferspeicher_oben
+    id: WarmWasser
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_zeit_bis_batterie_voll
+    id: ZeitBisVoll
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_pv1_energy_today
+    id: PV1EnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_pv2_energy_today
+    id: PV2EnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_battery_discharge_today
+    id: BatDischargeToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_battery_charge_today
+    id: BatChargeToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.iometer_gesamtbezug_today
+    id: GridEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_sysload_energy_today
+    id: HausEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: input_number.strompreis
+    id: Strompreis
+    internal: true
+
+  # Heizen / Kochen / Waschen
+  - platform: homeassistant
+    entity_id: sensor.total_power_label_heizen
+    id: HeizenPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_power_label_kochen
+    id: KochenPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_power_label_waschen
+    id: WaschenPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_energy_label_heizen_today
+    id: HeizenEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_energy_label_kochen_today
+    id: KochenEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.total_energy_label_waschen_today
+    id: WaschenEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_heizstab_energy_today
+    id: HeatEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.shelly_plug_mercedes_eqa_250_energy_meter_today
+    id: EQAEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.iometer_gesamteinspeisung_today
+    id: EinsEnergyToday
+    internal: true
+
+spi:
+  clk_pin: GPIO8
+  mosi_pin: GPIO10
+
+display:
+  - platform: waveshare_epaper
+    cs_pin: GPIO3
+    dc_pin: GPIO5
+    busy_pin:
+      number: GPIO4
+      inverted: true
+    reset_pin: GPIO2
+    model: 7.50inv2
+    update_interval: 30s
+    lambda: |-
+      // ---- Helpers ----
+      auto as_int = [](const std::string &s) -> int {
+        if (s.empty() || s == "unavailable" || s == "unknown" ||
+            s == "None" || s == "none" || s == "nan" || s == "NaN")
+          return 0;
+        return (int) lroundf(strtof(s.c_str(), nullptr));
+      };
+
+      auto as_float = [](const std::string &s) -> float {
+        if (s.empty() || s == "unavailable" || s == "unknown" ||
+            s == "None" || s == "none" || s == "nan" || s == "NaN")
+          return 0.0f;
+        return strtof(s.c_str(), nullptr);
+      };
+
+      // W / kW mit dynamischer Nachkommastellenzahl
+      auto fmt_power = [](char *buf, int value) {
+        if (abs(value) >= 1000) {
+          float kW = value / 1000.0f;
+          int x100 = (int) lroundf(kW * 100.0f);
+          int last_digit = x100 % 10;  // zweite Nachkommastelle
+          if (last_digit == 0) {
+            sprintf(buf, "%.1f kW", kW);
+          } else {
+            sprintf(buf, "%.2f kW", kW);
+          }
+        } else {
+          sprintf(buf, "%d W", value);
+        }
+      };
+
+      auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
+
+      // kWh: immer genau eine Nachkommastelle
+      auto fmt_energy = [](char *buf, float kwh) {
+        float rounded = roundf(kwh * 10.0f) / 10.0f;
+        sprintf(buf, "%.1f kWh", rounded);
+      };
+
+      const int screen_w = 800;
+
+      // ---- Werte laden ----
+      int   vHaus    = as_int(id(SysLoadPwr).state);
+      int   vPV      = as_int(id(PVPwr).state);
+      int   vGrid    = as_int(id(SysGridPwr).state);
+      int   vHeat    = as_int(id(HeatPwr).state);
+      int   vBat     = as_int(id(BatPwr).state);
+      int   vSOC     = as_int(id(BatSOC).state);
+      int   vEQA     = as_int(id(EQAPwr).state);
+      int   vWW      = as_int(id(WarmWasser).state);
+      int   vHeizen  = as_int(id(HeizenPwr).state);
+      int   vKochen  = as_int(id(KochenPwr).state);
+      int   vWaschen = as_int(id(WaschenPwr).state);
+
+      float vPV1Today        = as_float(id(PV1EnergyToday).state);
+      float vPV2Today        = as_float(id(PV2EnergyToday).state);
+      float vBatDisToday     = as_float(id(BatDischargeToday).state);
+      float vBatChgToday     = as_float(id(BatChargeToday).state);
+      float vGridToday       = as_float(id(GridEnergyToday).state);
+      float vHeatToday       = as_float(id(HeatEnergyToday).state);
+      float vEQAEnergyToday  = as_float(id(EQAEnergyToday).state);
+      float vEinsEnergyToday = as_float(id(EinsEnergyToday).state);
+      float vHausEnergyToday = as_float(id(HausEnergyToday).state);
+      float vHeizenEnergyToday  = as_float(id(HeizenEnergyToday).state);
+      float vKochenEnergyToday  = as_float(id(KochenEnergyToday).state);
+      float vWaschenEnergyToday = as_float(id(WaschenEnergyToday).state);
+      float vPrice           = as_float(id(Strompreis).state);
+
+      std::string sZeit = id(ZeitBisVoll).state;
+
+      int vBatMinus = (vBat < 0) ? -vBat : 0;
+      int vBatPlus  = (vBat > 0) ?  vBat : 0;
+
+      // --- HEIZEN-FIX: Heizen ohne Heizstab ---
+      int   vHeizenNet = vHeizen - vHeat;
+      if (vHeizenNet < 0) vHeizenNet = 0;
+
+      float heizen_energy = vHeizenEnergyToday - vHeatToday;
+      if (heizen_energy < 0.0f) heizen_energy = 0.0f;
+      float heizen_value  = heizen_energy * vPrice;
+
+      // ---- Hausleistung: Heizen bereits bereinigt verwenden ----
+      vHaus = vHaus - vHeat - vEQA - vHeizenNet - vKochen - vWaschen;
+
+      int vBezug       = (vGrid > 0) ? vGrid : 0;
+      int vEinspeisung = (vGrid < 0) ? abs(vGrid) : 0;
+
+      int pv_pct   = clamp((int) lroundf((vPV   / 12600.0f) * 100.0f));
+      int heat_pct = clamp((int) lroundf((vHeat /  9000.0f) * 100.0f));
+      int grid_pct = (vGrid < 0)
+                     ? clamp((int) lroundf((abs(vGrid) / 7560.0f) * 100.0f))
+                     : 0;
+
+      int batplus_pct = (vBatPlus > 0)
+                        ? clamp((int) lroundf((vBatPlus / 5090.0f) * 100.0f))
+                        : 0;
+
+      int batminus_pct_disp = (vBatMinus > 0)
+                        ? clamp((int) lroundf((vBatMinus / 6600.0f) * 100.0f))
+                        : 0;
+
+      float pv_today   = vPV1Today + vPV2Today;
+      float pv_value   = pv_today     * vPrice;
+      float bat_today  = vBatDisToday;
+      float bat_value  = bat_today    * vPrice;
+      float grid_today = vGridToday;
+      float grid_value = grid_today   * vPrice;
+
+      float heat_energy   = vHeatToday;
+      float heat_value    = vHeatToday * vPrice;
+      float eqa_energy    = vEQAEnergyToday;
+      float eqa_value     = vEQAEnergyToday * vPrice;
+      float kochen_energy = vKochenEnergyToday;
+      float kochen_value  = vKochenEnergyToday * vPrice;
+      float waschen_energy= vWaschenEnergyToday;
+      float waschen_value = vWaschenEnergyToday * vPrice;
+
+      float haus_energy = vHausEnergyToday
+                          - vHeatToday
+                          - vEQAEnergyToday
+                          - heizen_energy
+                          - vKochenEnergyToday
+                          - vWaschenEnergyToday;
+      if (haus_energy < 0.0f) haus_energy = 0.0f;
+      float haus_value  = haus_energy * vPrice;
+
+      float batc_energy = vBatChgToday;
+      float batc_value  = vBatChgToday * vPrice;
+      float eins_energy = vEinsEnergyToday;
+      float eins_value  = vEinsEnergyToday * 0.0794f;   // fester Einspeisepreis
+
+      // Formatstrings
+      char sHaus[20], sPV[20], sHeat[20], sEQA[20],
+           sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20],
+           sHeizenStr[20], sKochen[20], sWaschen[20];
+
+      fmt_power(sHaus,    vHaus);
+      fmt_power(sPV,      vPV);
+      fmt_power(sHeat,    vHeat);
+      fmt_power(sEQA,     vEQA);
+      fmt_power(sBezug,   vBezug);
+      fmt_power(sEins,    vEinspeisung);
+      fmt_power(sBatMinusStr, vBatMinus);
+      fmt_power(sBatPlusStr,  vBatPlus);
+      fmt_power(sHeizenStr,   vHeizenNet);   // Heizen = ohne Heizstab
+      fmt_power(sKochen,  vKochen);
+      fmt_power(sWaschen, vWaschen);
+
+      // ----------------------------------------------------
+      // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – zentriert
+      // ----------------------------------------------------
+      int pSolar = (vPV       > 0) ? vPV       : 0;
+      int pBezug = (vBezug    > 0) ? vBezug    : 0;
+      int pBatIn = (vBatMinus > 0) ? vBatMinus : 0;
+
+      int totalIn = pSolar + pBezug + pBatIn;
+
+      int shareSolar = 0, shareBezug = 0, shareBatIn = 0;
+      if (totalIn > 0) {
+        shareSolar = (int) lroundf(pSolar * 100.0f / totalIn);
+        shareBezug = (int) lroundf(pBezug * 100.0f / totalIn);
+        shareBatIn = (int) lroundf(pBatIn * 100.0f / totalIn);
+      }
+
+      int active_inflow_count =
+          (pSolar > 0 ? 1 : 0) +
+          (pBezug > 0 ? 1 : 0) +
+          (pBatIn > 0 ? 1 : 0);
+
+      {
+        int inflow_count = 3;
+        int seg_w = screen_w / inflow_count;
+        int idx   = 0;
+
+        const int yLabel  = 0;
+        const int yPower  = 30;
+        const int yExtra  = 70;
+
+        auto draw_inflow = [&](const char* label,
+                               const char* value,
+                               const std::string &extra_text) {
+          int cx = idx * seg_w + seg_w / 2;
+
+          it.printf(cx, yLabel, id(tinyFont), TextAlign::TOP_CENTER, "%s", label);
+          it.printf(cx, yPower, id(myFont),   TextAlign::TOP_CENTER, "%s", value);
+
+          if (!extra_text.empty()) {
+            it.printf(cx, yExtra, id(tinyFont), TextAlign::TOP_CENTER, "%s", extra_text.c_str());
+          }
+
+          idx++;
+        };
+
+        char pv_full[32], bez_full[32], bat_full[32];
+
+        if (vPV > 0)
+          sprintf(pv_full, "%s %d%%", sPV, pv_pct);
+        else
+          sprintf(pv_full, "%s", sPV);
+
+        sprintf(bez_full, "%s", sBezug);
+
+        if (vBatMinus > 0)
+          sprintf(bat_full, "%s %d%%", sBatMinusStr, batminus_pct_disp);
+        else
+          sprintf(bat_full, "%s", sBatMinusStr);
+
+        char buf[48], ebuf[24];
+        std::string pv_today_str;
+        std::string bez_today_str;
+        std::string bat_today_str;
+
+        fmt_energy(ebuf, pv_today);
+        sprintf(buf, "%s €%.2f", ebuf, pv_value);
+        pv_today_str = buf;
+
+        fmt_energy(ebuf, grid_today);
+        sprintf(buf, "%s €%.2f", ebuf, grid_value);
+        bez_today_str = buf;
+
+        fmt_energy(ebuf, bat_today);
+        sprintf(buf, "%s €%.2f", ebuf, bat_value);
+        bat_today_str = buf;
+
+        char lblSolar[32]      = "Solar";
+        char lblBezugLbl[32]   = "Netz";
+        char lblBatterieIn[32] = "Batterie";
+
+        if (totalIn > 0 && active_inflow_count > 1) {
+          if (shareSolar > 0)
+            sprintf(lblSolar, "Solar %d%%", shareSolar);
+          if (shareBezug > 0)
+            sprintf(lblBezugLbl, "Netz %d%%", shareBezug);
+          if (shareBatIn > 0)
+            sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
+        }
+
+        idx = 0;
+        draw_inflow(lblSolar,      pv_full,  pv_today_str);
+        draw_inflow(lblBezugLbl,   bez_full, bez_today_str);
+        draw_inflow(lblBatterieIn, bat_full, bat_today_str);
+      }
+
+      // 3 Linien unter dem Zuflussblock
+      {
+        const int base_x = 10;
+        const int total_w = 780;
+        const int seg_w = total_w / 3;
+        const int y_line = 110;
+        int total = pSolar + pBezug + pBatIn;
+        if (total < 1) total = 1;
+
+        auto line_len = [&](int value) -> int {
+          if (value <= 0) return 0;
+          return (int) lroundf(seg_w * (float)value / (float)total);
+        };
+
+        int lenSolar = line_len(pSolar);
+        int lenNetz  = line_len(pBezug);
+        int lenBat   = line_len(pBatIn);
+
+        if (lenSolar > 0) {
+          int xS = base_x;
+          it.filled_rectangle(xS, y_line, lenSolar, 3);
+        }
+
+        if (lenNetz > 0) {
+          int midNet = base_x + total_w/2;
+          int xN = midNet - lenNetz/2;
+          it.filled_rectangle(xN, y_line, lenNetz, 3);
+        }
+
+        if (lenBat > 0) {
+          int rightBat = base_x + total_w;
+          int xB = rightBat - lenBat;
+          it.filled_rectangle(xB, y_line, lenBat, 3);
+        }
+      }
+
+      // ----------------------------------------------------
+      // VERBRAUCHER-TABELLE (ohne Warmwasser)
+      // ----------------------------------------------------
+      struct Row {
+        const char* name;
+        int   power_w;
+        int   power_pct;
+        float energy_kwh;
+        float cost_eur;
+        int   energy_pct;
+      };
+
+      int pHausC    = (vHaus       > 0) ? vHaus       : 0;
+      int pHeatC    = (vHeat       > 0) ? vHeat       : 0;
+      int pEQAC     = (vEQA        > 0) ? vEQA        : 0;
+      int pBatC     = (vBatPlus    > 0) ? vBatPlus    : 0;
+      int pEinsC    = (vEinspeisung> 0) ? vEinspeisung: 0;
+      int pHeizenC  = (vHeizenNet  > 0) ? vHeizenNet  : 0;
+      int pKochenC  = (vKochen     > 0) ? vKochen     : 0;
+      int pWaschenC = (vWaschen    > 0) ? vWaschen    : 0;
+
+      int totalConsP = pHausC + pHeatC + pEQAC + pBatC + pEinsC
+                       + pHeizenC + pKochenC + pWaschenC;
+
+      float totalConsE = haus_energy + heat_energy + eqa_energy +
+                         batc_energy + eins_energy +
+                         heizen_energy + kochen_energy + waschen_energy;
+
+      Row rows[8];
+      int n_rows = 0;
+
+      auto add_row = [&](const char* name,
+                         int pwr, float e_kwh, float val_eur) {
+        if (n_rows >= 8) return;
+        Row &r = rows[n_rows++];
+        r.name       = name;
+        r.power_w    = pwr;
+        r.energy_kwh = e_kwh;
+        r.cost_eur   = val_eur;
+        r.power_pct  = 0;
+        r.energy_pct = 0;
+      };
+
+      // Warmwasser explizit NICHT in der Tabelle
+      add_row("Haus",     vHaus,      haus_energy,    haus_value);
+      add_row("Heizstab", vHeat,      heat_energy,    heat_value);
+      add_row("EQA",      vEQA,       eqa_energy,     eqa_value);
+      add_row("Heizen",   vHeizenNet, heizen_energy,  heizen_value);
+      add_row("Kochen",   vKochen,    kochen_energy,  kochen_value);
+      add_row("Waschen",  vWaschen,   waschen_energy, waschen_value);
+      add_row("Batterie", vBatPlus,   batc_energy,    batc_value);
+      add_row("Export",   vEinspeisung, eins_energy,  eins_value);
+
+      if (totalConsP > 0) {
+        for (int i = 0; i < n_rows; i++) {
+          int p = (rows[i].power_w > 0) ? rows[i].power_w : 0;
+          rows[i].power_pct = (int) lroundf(p * 100.0f / totalConsP);
+        }
+      }
+
+      if (totalConsE > 0.0f) {
+        for (int i = 0; i < n_rows; i++) {
+          float e = (rows[i].energy_kwh > 0.0f) ? rows[i].energy_kwh : 0.0f;
+          rows[i].energy_pct = (int) lroundf(e * 100.0f / totalConsE);
+        }
+      }
+
+      // Sortieren nach Leistung (absteigend)
+      for (int i = 0; i < n_rows - 1; i++) {
+        for (int j = i + 1; j < n_rows; j++) {
+          if (rows[j].power_w > rows[i].power_w) {
+            Row tmp = rows[i];
+            rows[i] = rows[j];
+            rows[j] = tmp;
+          }
+        }
+      }
+
+      // Tabelle: Koordinaten (deine Version)
+      const int xPowerPct  = 120;
+      const int xName      = 150;
+      const int xPower     = 380;
+      const int xEnergy    = 530;
+      const int xCost      = 660;
+      const int xEnergyPct = 750;
+
+      const int yTableStart = 120;
+      const int row_h       = 35;
+
+      for (int i = 0; i < n_rows; i++) {
+        int y = yTableStart + i * row_h;
+        Row &r = rows[i];
+
+        // Name linksbündig
+        it.printf(xName, y, id(tinyFont), TextAlign::TOP_LEFT, "%s", r.name);
+
+        // Leistung: W / kW, rechtsbündig
+        {
+          char pbuf[20];
+          fmt_power(pbuf, r.power_w);
+          it.printf(xPower, y, id(tinyFont), TextAlign::TOP_RIGHT, "%s", pbuf);
+        }
+
+        // Leistungsanteil rechtsbündig
+        it.printf(xPowerPct, y, id(tinyFont), TextAlign::TOP_RIGHT, "%d%%", r.power_pct);
+
+        // Energie kWh rechtsbündig
+        {
+          char eb[24];
+          fmt_energy(eb, r.energy_kwh);
+          it.printf(xEnergy, y, id(tinyFont), TextAlign::TOP_RIGHT, "%s", eb);
+        }
+
+        // Kosten € rechtsbündig, mit "XX.XX €"
+        it.printf(xCost, y, id(tinyFont), TextAlign::TOP_RIGHT, "%.2f €", r.cost_eur);
+
+        // Energieanteil rechtsbündig
+        it.printf(xEnergyPct, y, id(tinyFont), TextAlign::TOP_RIGHT, "%d%%", r.energy_pct);
+      }
+
+      // ----------------------------------------------------
+      // SOC-BALKEN
+      // ----------------------------------------------------
+      const int bx=50, by=440, bw=700, bh=20;
+
+      char sSoc[64];
+      if (!sZeit.empty() && sZeit!="unknown" && sZeit!="unavailable"){
+        float h = strtof(sZeit.c_str(), nullptr);
+        if (h>0 && h<999){
+          int hh = (int)floor(h);
+          int mm = (int)lround((h-hh)*60.0f);
+          if (mm>=60){ mm-=60; hh++; }
+          sprintf(sSoc,"Batterie: %d%% | %dh %02dmin bis voll", vSOC, hh, mm);
+        } else {
+          sprintf(sSoc,"Batterie: %d%%", vSOC);
+        }
+      } else {
+        sprintf(sSoc,"Batterie: %d%%", vSOC);
+      }
+
+      it.printf(bx, by-35, id(tinyFont), "%s", sSoc);
+      it.rectangle(bx,by,bw,bh);
+
+      int fw = bw * clamp(vSOC)/100;
+      if (fw>0) it.filled_rectangle(bx,by,fw,bh);
+
+      for (int i=0;i<=9;i++){
+        int tx = bx + (bw*i)/10;
+        it.line(tx, by+bh+2, tx, by+bh+8);
+      }
+
+      int marks[5]={0,25,50,75,100};
+      for (int i=0;i<5;i++){
+        int p = marks[i];
+        int tx = bx + (bw*p)/100;
+        if (p==100) tx -= 2;
+        it.line(tx,     by+bh-2, tx,     by+bh+10);
+        it.line(tx + 1, by+bh-2, tx + 1, by+bh+10);
+      }
