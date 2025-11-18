@@ -1,14 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.4_table
-#  Änderungen ggü. 1.3_table:
-#    - Zuflussblock (Solar / Netz / Batterie):
-#        * Text zentriert via TextAlign::TOP_CENTER
-#        * tiny_char_width / tiny_text_width entfernt
-#        * keine eigene Breitenberechnung mehr nötig
-#    - Tabelle:
-#        * Spaltenkoordinaten wie vom Nutzer angepasst
-#        * Kosten-Ausgabe: "%.2f €"
+#  Version: 1.8_table
+#  Änderungen ggü. 1.7_table:
+#    - SOC-Balken-Ticks nur noch bei 10..90 % im Balken, keine Ticks bei 0/100
+#    - keine dicken Ticks mehr
+#    - Tabelle: Spalten-X angepasst (xPowerPct=120, xName=150, xPower=380, xEnergy=530, xCost=660, xEnergyPct=750)
+#    - SOC-Balken an unteren Rand verschoben (by=455), Batterie-/Warmwasser-Label folgen
 # --------------------------------------------------------------------
 
 esphome:
@@ -412,7 +409,7 @@ display:
         draw_inflow(lblBatterieIn, bat_full, bat_today_str);
       }
 
-      // 3 Linien unter dem Zuflussblock
+      // 3 Linien unter dem Zuflussblock (unverändert)
       {
         const int base_x = 10;
         const int total_w = 780;
@@ -526,7 +523,7 @@ display:
         }
       }
 
-      // Tabelle: Koordinaten (deine Version)
+      // Tabelle: Koordinaten (angepasst)
       const int xPowerPct  = 120;
       const int xName      = 150;
       const int xPower     = 380;
@@ -569,10 +566,14 @@ display:
       }
 
       // ----------------------------------------------------
-      // SOC-BALKEN
+      // SOC-BALKEN + Batterie-Label + Warmwasser (unten)
       // ----------------------------------------------------
-      const int bx=50, by=440, bw=700, bh=20;
+      const int bx=10;      // 10 px Rand links
+      const int by=455;     // nahe unterer Rand (480 Höhe, bh=20 -> unten bei 475)
+      const int bw=780;     // 10 px Rand rechts
+      const int bh=20;
 
+      // Batterie-Label + Restzeit
       char sSoc[64];
       if (!sZeit.empty() && sZeit!="unknown" && sZeit!="unavailable"){
         float h = strtof(sZeit.c_str(), nullptr);
@@ -589,21 +590,34 @@ display:
       }
 
       it.printf(bx, by-35, id(tinyFont), "%s", sSoc);
+
+      // Warmwasser rechtsbündig am rechten Ende des Balkens, gleiche Höhe
+      {
+        char sWW[32];
+        sprintf(sWW, "Warmwasser: %d°C", vWW);
+        it.printf(bx + bw, by-35, id(tinyFont), TextAlign::TOP_RIGHT, "%s", sWW);
+      }
+
+      // Balken
       it.rectangle(bx,by,bw,bh);
 
       int fw = bw * clamp(vSOC)/100;
       if (fw>0) it.filled_rectangle(bx,by,fw,bh);
 
-      for (int i=0;i<=9;i++){
-        int tx = bx + (bw*i)/10;
-        it.line(tx, by+bh+2, tx, by+bh+8);
-      }
+      // Ticks im Balken: nur 10..90 %, invertiert im gefüllten Bereich
+      {
+        int small_h = bh - 6;               // etwas kleiner als Balken
+        int small_y = by + (bh - small_h)/2;
+        int filled_end = bx + fw;
 
-      int marks[5]={0,25,50,75,100};
-      for (int i=0;i<5;i++){
-        int p = marks[i];
-        int tx = bx + (bw*p)/100;
-        if (p==100) tx -= 2;
-        it.line(tx,     by+bh-2, tx,     by+bh+10);
-        it.line(tx + 1, by+bh-2, tx + 1, by+bh+10);
+        for (int i = 1; i <= 9; i++) {      // keine Ticks bei 0 und 100 %
+          int tx = bx + (bw * i) / 10;
+          bool in_filled = (tx <= filled_end);
+
+          if (in_filled) {
+            it.filled_rectangle(tx, small_y, 1, small_h, COLOR_OFF);
+          } else {
+            it.filled_rectangle(tx, small_y, 1, small_h);
+          }
+        }
       }
