@@ -1,11 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.10_table
-#  Änderungen ggü. 1.9_table:
-#    - Logik unverändert, nur Refactoring:
-#      - Helper share_pct_int / share_pct_float
-#      - Layout-Konstanten gebündelt
-#      - Berechnungs- und Anzeige-Logik klarer getrennt
+#  Version: 1.11_table
+#  Änderungen ggü. 1.10_table:
+#    - Verbrauchertabelle wird jetzt zweistufig sortiert:
+#      konfigurierbar über sort_primary / sort_secondary.
+#      Standard: primär nach Kosten (absteigend),
+#                sekundär nach Leistung (absteigend).
 # --------------------------------------------------------------------
 
 esphome:
@@ -500,6 +500,41 @@ display:
         int   energy_pct;
       };
 
+      // Sortiermodi
+      const int SORT_BY_COST      = 0;
+      const int SORT_BY_POWER     = 1;
+      const int SORT_BY_ENERGY    = 2;
+      const int SORT_BY_POWER_PCT = 3;
+      const int SORT_BY_ENERGY_PCT= 4;
+
+      // Konfiguration: hier Sortierkriterien einstellen (absteigend)
+      const int sort_primary   = SORT_BY_COST;   // Standard: teuerste zuerst
+      const int sort_secondary = SORT_BY_POWER;  // bei gleichen Kosten: höchste Leistung zuerst
+
+      auto get_sort_key = [&](const Row &r, int mode) -> float {
+        switch (mode) {
+          case SORT_BY_COST:       return r.cost_eur;
+          case SORT_BY_POWER:      return (float) r.power_w;
+          case SORT_BY_ENERGY:     return r.energy_kwh;
+          case SORT_BY_POWER_PCT:  return (float) r.power_pct;
+          case SORT_BY_ENERGY_PCT: return (float) r.energy_pct;
+          default:                 return 0.0f;
+        }
+      };
+
+      auto row_is_better = [&](const Row &a, const Row &b) -> bool {
+        // "besser" = soll weiter nach oben = größerer Sortierwert
+        float pa = get_sort_key(a, sort_primary);
+        float pb = get_sort_key(b, sort_primary);
+        if (pa > pb) return true;
+        if (pa < pb) return false;
+
+        // Primär gleich → Sekundär vergleichen
+        float sa = get_sort_key(a, sort_secondary);
+        float sb = get_sort_key(b, sort_secondary);
+        return sa > sb;
+      };
+
       int pHausC    = (vHaus       > 0) ? vHaus       : 0;
       int pHeatC    = (vHeat       > 0) ? vHeat       : 0;
       int pEQAC     = (vEQA        > 0) ? vEQA        : 0;
@@ -555,10 +590,10 @@ display:
         }
       }
 
-      // Sortieren nach Leistung (absteigend)
+      // Sortieren nach sort_primary / sort_secondary (beide absteigend)
       for (int i = 0; i < n_rows - 1; i++) {
         for (int j = i + 1; j < n_rows; j++) {
-          if (rows[j].cost_eur > rows[i].cost_eur) {
+          if (row_is_better(rows[j], rows[i])) {
             Row tmp = rows[i];
             rows[i] = rows[j];
             rows[j] = tmp;
