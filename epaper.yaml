@@ -1,11 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.44
-#  Änderungen ggü. 1.43:
-#    - Trennlinie zwischen Zufluss und Verbrauch von 5 px auf 3 px reduziert
-#    - kWh-Darstellung dynamisch:
-#        * x.0 kWh  -> "x kWh"
-#        * sonst    -> "x.xx kWh"
+#  Version: 1.45
+#  Änderungen ggü. 1.44:
+#    - Zufluss-Batterie (oben) zeigt jetzt Leistungs-Prozentwert
+#      (100 % entsprechen 6600 W, z.B. "690 W 10%")
+#    - Verbraucher-Label "Einspeisung" in "Export" umbenannt
 # --------------------------------------------------------------------
 
 esphome:
@@ -290,9 +289,14 @@ display:
                      ? clamp((int) lroundf((abs(vGrid) / 7560.0f) * 100.0f))
                      : 0;
 
-      // Batterie-Lade-Prozent (100 % = 5090 W)
+      // Batterie-Lade-Prozent (100 % = 5090 W) für Verbraucher-Batterie unten
       int batplus_pct = (vBatPlus > 0)
                         ? clamp((int) lroundf((vBatPlus / 5090.0f) * 100.0f))
+                        : 0;
+
+      // Batterie-Entlade-Prozent für Zufluss-Batterie (oben), 100 % = 6600 W
+      int batminus_pct_disp = (vBatMinus > 0)
+                        ? clamp((int) lroundf((vBatMinus / 6600.0f) * 100.0f))
                         : 0;
 
       // Tageserträge + Werte (Zufluss-Bereich)
@@ -385,7 +389,11 @@ display:
           sprintf(pv_full, "%s", sPV);
 
         sprintf(bez_full, "%s", sBezug);
-        sprintf(bat_full, "%s", sBatMinusStr);
+
+        if (vBatMinus > 0)
+          sprintf(bat_full, "%s %d%%", sBatMinusStr, batminus_pct_disp);
+        else
+          sprintf(bat_full, "%s", sBatMinusStr);
 
         // Energie + € (eine Zeile) – ohne Klammern, mit dynamischer kWh
         char buf[48], ebuf[24];
@@ -431,7 +439,7 @@ display:
       // ----------------------------------------------------
       // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
       //   Oben: Haus, Heizstab, EQA
-      //   Unten: Warmwasser, Batterie, Einspeisung
+      //   Unten: Warmwasser, Batterie, Export
       //   Verbraucher-"Batterie" nutzt battery_charge_today
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
@@ -483,7 +491,7 @@ display:
       char lblEQA[32]        = "EQA";
       char lblWW[32]         = "Warmwasser";
       char lblBatVerbr[32]   = "Batterie";
-      char lblEinspeisung[32]= "Einspeisung";
+      char lblExport[32]     = "Export";
 
       if (totalCons > 0 && consumer_count > 1) {
         if (shareHaus > 0)
@@ -495,7 +503,7 @@ display:
         if (shareBatC > 0)
           sprintf(lblBatVerbr, "Batterie %d%%", shareBatC);
         if (shareEins > 0)
-          sprintf(lblEinspeisung, "Einspeisung %d%%", shareEins);
+          sprintf(lblExport, "Export %d%%", shareEins);
       }
 
       // Energie/EUR für Verbraucher
@@ -520,14 +528,14 @@ display:
 
       // Feste Reihen:
       // 0: Haus, 1: Heizstab, 2: EQA
-      // 3: Warmwasser, 4: Batterie, 5: Einspeisung
+      // 3: Warmwasser, 4: Batterie, 5: Export
       Item items[6] = {
-        { lblHaus,        sHaus,      haus_energy,  haus_value     },
-        { lblHeiz,        heat_full,  heat_energy,  heat_value     },
-        { lblEQA,         eqa_full,   eqa_energy,   eqa_value      },
-        { lblWW,          ww_full,    ww_energy,    ww_value       },
-        { lblBatVerbr,    batp_full,  batc_energy,  batc_value     },
-        { lblEinspeisung, eins_full,  eins_energy,  eins_value     }
+        { lblHaus,     sHaus,      haus_energy,  haus_value     },
+        { lblHeiz,     heat_full,  heat_energy,  heat_value     },
+        { lblEQA,      eqa_full,   eqa_energy,   eqa_value      },
+        { lblWW,       ww_full,    ww_energy,    ww_value       },
+        { lblBatVerbr, batp_full,  batc_energy,  batc_value     },
+        { lblExport,   eins_full,  eins_energy,  eins_value     }
       };
 
       auto draw_row_fixed = [&](int start_index, int count,
@@ -558,7 +566,7 @@ display:
       // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
       draw_row_fixed(0, 3, 160, 190, 230);
 
-      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung
+      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Export
       draw_row_fixed(3, 3, 280, 310, 350);
 
       // ----------------------------------------------------
