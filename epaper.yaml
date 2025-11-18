@@ -1,11 +1,12 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.39
-#  Änderungen ggü. 1.38:
-#    - Verbrauchsblock: Labels verwenden tinyFont statt myFont
-#    - Abstände Label/Leistung/Energie im Verbrauchsblock
-#      analog zum Zuflussblock (Delta: +30 / +40 Pixel)
-#    - Zentrierung der Labels im Verbrauchsblock jetzt über Tiny-LUT
+#  Version: 1.40
+#  Änderungen ggü. 1.39:
+#    - Haus-Energie eingebaut:
+#        sensor.powerocean_sysload_energy_today
+#      Haus_Energie = SysLoadEnergyToday - HeizstabEnergyToday - EQAEnergyToday
+#      (nicht negativ werden lassen)
+#    - Haus zeigt nun Energie + Euro-Wert im Verbrauchsblock
 # --------------------------------------------------------------------
 
 esphome:
@@ -113,6 +114,10 @@ text_sensor:
   - platform: homeassistant
     entity_id: sensor.iometer_gesamtbezug_today
     id: GridEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.powerocean_sysload_energy_today
+    id: HausEnergyToday
     internal: true
   - platform: homeassistant
     entity_id: input_number.strompreis
@@ -246,6 +251,7 @@ display:
       float vHeatToday       = as_float(id(HeatEnergyToday).state);
       float vEQAEnergyToday  = as_float(id(EQAEnergyToday).state);
       float vEinsEnergyToday = as_float(id(EinsEnergyToday).state);
+      float vHausEnergyToday = as_float(id(HausEnergyToday).state);
       float vPrice           = as_float(id(Strompreis).state);
 
       std::string sZeit = id(ZeitBisVoll).state;
@@ -253,7 +259,7 @@ display:
       int vBatMinus = (vBat < 0) ? -vBat : 0;
       int vBatPlus  = (vBat > 0) ?  vBat : 0;
 
-      // ---- Hausverbrauch berechnen ----
+      // ---- Hausleistung berechnen ----
       vHaus = vHaus - vHeat - vEQA;
 
       // Netzwerte
@@ -281,6 +287,11 @@ display:
 
       float grid_today = vGridToday;
       float grid_value = grid_today   * vPrice;
+
+      // Haus-Energie = SysLoadEnergyToday - HeizstabEnergyToday - EQAEnergyToday
+      float haus_energy   = vHausEnergyToday - vHeatToday - vEQAEnergyToday;
+      if (haus_energy < 0.0f) haus_energy = 0.0f;
+      float haus_value    = haus_energy * vPrice;
 
       // ---- Formatstrings für Leistungen ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
@@ -325,8 +336,8 @@ display:
         int idx   = 0;
 
         const int yLabel  = 10;
-        const int yPower  = 40;  // +30
-        const int yExtra  = 80;  // +40
+        const int yPower  = 40;  // Label +30
+        const int yExtra  = 80;  // Power +40
 
         auto draw_inflow = [&](const char* label,
                                const char* value,
@@ -399,7 +410,7 @@ display:
       // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
       //   Oben: Haus, Heizstab, EQA
       //   Unten: Warmwasser, Batterie, Einspeisung (20 px tiefer)
-      //   Abstände Label/Leistung/Energie wie im Zuflussblock (+30/+40)
+      //   Abstände Label/Leistung/Energie wie im Zuflussblock
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -466,8 +477,6 @@ display:
       }
 
       // Energie/EUR für Verbraucher
-      float haus_energy   = 0.0f;
-      float haus_value    = 0.0f;
       float heat_energy   = vHeatToday;
       float heat_value    = vHeatToday * vPrice;
       float eqa_energy    = vEQAEnergyToday;
@@ -525,12 +534,11 @@ display:
       };
 
       // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
-      // Label/Leistung/Energie mit Abständen 30/40 wie oben:
-      // 160 -> 190 -> 230
+      //  Label/Leistung/Energie mit Abständen 30/40: 160 -> 190 -> 230
       draw_row_fixed(0, 3, 160, 190, 230);
 
       // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung
-      // 20 px tiefer: 280 -> 310 -> 350
+      //  20 px tiefer: 280 -> 310 -> 350
       draw_row_fixed(3, 3, 280, 310, 350);
 
       // ----------------------------------------------------
