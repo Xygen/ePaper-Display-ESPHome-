@@ -1,12 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.43
-#  Änderungen ggü. 1.42:
-#    - Verbraucher "Batterie" verwendet jetzt
-#        sensor.powerocean_battery_charge_today
-#      für die Energie-/Euroanzeige
-#    - Zufluss "Batterie" oben nutzt weiterhin
-#        sensor.powerocean_battery_discharge_today
+#  Version: 1.44
+#  Änderungen ggü. 1.43:
+#    - Trennlinie zwischen Zufluss und Verbrauch von 5 px auf 3 px reduziert
+#    - kWh-Darstellung dynamisch:
+#        * x.0 kWh  -> "x kWh"
+#        * sonst    -> "x.xx kWh"
 # --------------------------------------------------------------------
 
 esphome:
@@ -158,12 +157,12 @@ display:
         return strtof(s.c_str(), nullptr);
       };
 
-      // kW mit dynamischer Nachkommastellenzahl
+      // Leistung: kW mit dynamischer Nachkommastellenzahl
       auto fmt_power = [](char *buf, int value) {
         if (abs(value) >= 1000) {
           float kW = value / 1000.0f;
-          int x100 = (int) lroundf(kW * 100.0f);   // zwei Nachkommastellen *100
-          int last_digit = x100 % 10;              // zweite Nachkommastelle
+          int x100 = (int) lroundf(kW * 100.0f);
+          int last_digit = x100 % 10;  // zweite Nachkommastelle
           if (last_digit == 0) {
             sprintf(buf, "%.1f kW", kW);
           } else {
@@ -175,6 +174,19 @@ display:
       };
 
       auto clamp = [](int v){ return std::min(100, std::max(0, v)); };
+
+      // kWh dynamisch:
+      //  x.0 kWh  -> "x kWh"
+      //  sonst    -> "x.xx kWh"
+      auto fmt_energy = [](char *buf, float kwh) {
+        float rounded = roundf(kwh * 100.0f) / 100.0f;
+        int   as_int  = (int) lroundf(rounded);
+        if (fabsf(rounded - (float)as_int) < 0.005f) {
+          sprintf(buf, "%d kWh", as_int);
+        } else {
+          sprintf(buf, "%.2f kWh", rounded);
+        }
+      };
 
       // --- Zeichenbreiten-LUT für tinyFont (Inter @ 28) ---
       auto tiny_char_width = [](char c) -> int {
@@ -375,17 +387,22 @@ display:
         sprintf(bez_full, "%s", sBezug);
         sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € (eine Zeile) – ohne Klammern
-        char buf[48];
+        // Energie + € (eine Zeile) – ohne Klammern, mit dynamischer kWh
+        char buf[48], ebuf[24];
         std::string pv_today_str;
         std::string bez_today_str;
         std::string bat_today_str;
 
-        sprintf(buf, "%.1f kWh %.2f €", pv_today,   pv_value);
+        fmt_energy(ebuf, pv_today);
+        sprintf(buf, "%s %.2f €", ebuf, pv_value);
         pv_today_str = buf;
-        sprintf(buf, "%.1f kWh %.2f €", grid_today, grid_value);
+
+        fmt_energy(ebuf, grid_today);
+        sprintf(buf, "%s %.2f €", ebuf, grid_value);
         bez_today_str = buf;
-        sprintf(buf, "%.1f kWh %.2f €", bat_today,  bat_value);
+
+        fmt_energy(ebuf, bat_today);
+        sprintf(buf, "%s %.2f €", ebuf, bat_value);
         bat_today_str = buf;
 
         // Labels (mit Prozent nur bei >1 aktivem Zufluss)
@@ -408,14 +425,14 @@ display:
         draw_inflow(lblBatterieIn, bat_full, bat_today_str);
       }
 
-      // Trenner
-      it.filled_rectangle(10,130,780,5);
+      // Trenner (dünner: 3 px)
+      it.filled_rectangle(10,130,780,3);
 
       // ----------------------------------------------------
       // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
       //   Oben: Haus, Heizstab, EQA
-      //   Unten: Warmwasser, Batterie, Einspeisung (20 px tiefer)
-      //   Verbraucher-"Batterie" nutzt jetzt battery_charge_today
+      //   Unten: Warmwasser, Batterie, Einspeisung
+      //   Verbraucher-"Batterie" nutzt battery_charge_today
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
@@ -488,8 +505,8 @@ display:
       float eqa_value     = vEQAEnergyToday * vPrice;
       float ww_energy     = 0.0f;
       float ww_value      = 0.0f;
-      float batc_energy   = vBatChgToday;           // jetzt: CHARGE
-      float batc_value    = vBatChgToday * vPrice;  // mit Strompreis
+      float batc_energy   = vBatChgToday;           // Charge
+      float batc_value    = vBatChgToday * vPrice;
       float eins_energy   = vEinsEnergyToday;
       // Fester Einspeisepreis 0,0794 €/kWh
       float eins_value    = vEinsEnergyToday * 0.0794f;
@@ -524,14 +541,13 @@ display:
           int lbl_px = tiny_text_width(lbl_str);
           int val_px = strlen(it_item.value) * cw_big;
 
-          // Label im tinyFont, zentriert nach Tiny-LUT
           it.printf(cx - lbl_px/2, yL, id(tinyFont), "%s", it_item.label);
-          // Leistung im myFont
           it.printf(cx - val_px/2, yV, id(myFont),   "%s", it_item.value);
 
           if (it_item.energy_kwh > 0.0f) {
-            char eb[48];
-            sprintf(eb, "%.1f kWh %.2f €", it_item.energy_kwh, it_item.value_eur);
+            char eb[48], ebuf2[24];
+            fmt_energy(ebuf2, it_item.energy_kwh);
+            sprintf(eb, "%s %.2f €", ebuf2, it_item.value_eur);
             std::string es = eb;
             int e_px = tiny_text_width(es);
             it.printf(cx - e_px/2, yE, id(tinyFont), "%s", es.c_str());
