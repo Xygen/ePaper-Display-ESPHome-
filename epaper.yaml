@@ -2,10 +2,10 @@
 #  ePaper Display – PowerOcean Dashboard
 #  Version: 1.39
 #  Änderungen ggü. 1.38:
-#    - Labels im Verbrauchsblock (Haus, Heizstab, EQA, Warmwasser,
-#      Batterie, Einspeisung) verwenden tinyFont statt myFont
-#    - Energie-/Euro-Zeilen im Verbrauchsblock jeweils 5 Pixel nach
-#      unten verschoben (yE oben 230→235, unten 350→355)
+#    - Verbrauchsblock: Labels verwenden tinyFont statt myFont
+#    - Abstände Label/Leistung/Energie im Verbrauchsblock
+#      analog zum Zuflussblock (Delta: +30 / +40 Pixel)
+#    - Zentrierung der Labels im Verbrauchsblock jetzt über Tiny-LUT
 # --------------------------------------------------------------------
 
 esphome:
@@ -296,10 +296,10 @@ display:
       fmt_power(sBatPlusStr,  vBatPlus);
 
       const int screen_w = 800;
-      const int cw_big   = 18;  // Breite pro Zeichen für myFont (~geschätzt)
+      const int cw_big   = 18;  // myFont Breite grob
 
       // ----------------------------------------------------
-      // ZUFLUSS-BEREICH (Solar / Netz / Batterie) – immer sichtbar
+      // ZUFLUSS-BEREICH (Solar / Netz / Batterie)
       // ----------------------------------------------------
       int pSolar = (vPV       > 0) ? vPV       : 0;
       int pBezug = (vBezug    > 0) ? vBezug    : 0;
@@ -325,8 +325,8 @@ display:
         int idx   = 0;
 
         const int yLabel  = 10;
-        const int yPower  = 40;  // Leistung
-        const int yExtra  = 80;  // Energie + € (eine Zeile)
+        const int yPower  = 40;  // +30
+        const int yExtra  = 80;  // +40
 
         auto draw_inflow = [&](const char* label,
                                const char* value,
@@ -359,7 +359,7 @@ display:
         sprintf(bez_full, "%s", sBezug);
         sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € in einer Zeile, mit 1 Nachkommastelle für kWh
+        // Energie + € (eine Zeile)
         char buf[48];
         std::string pv_today_str;
         std::string bez_today_str;
@@ -386,7 +386,6 @@ display:
             sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
         }
 
-        // Reihenfolge: Solar – Netz – Batterie
         idx = 0;
         draw_inflow(lblSolar,      pv_full,  pv_today_str);
         draw_inflow(lblBezugLbl,   bez_full, bez_today_str);
@@ -398,12 +397,13 @@ display:
 
       // ----------------------------------------------------
       // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
-      //   obere Reihe: Haus, Heizstab, EQA
-      //   untere Reihe: Warmwasser, Batterie, Einspeisung (20px nach unten)
+      //   Oben: Haus, Heizstab, EQA
+      //   Unten: Warmwasser, Batterie, Einspeisung (20 px tiefer)
+      //   Abstände Label/Leistung/Energie wie im Zuflussblock (+30/+40)
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
-      sprintf(heat_full, "%s", sHeat);
+      sprintf(heat_full, "%s (%d%%)", sHeat, heat_pct);
       sprintf(eqa_full,  "%s", sEQA);
       sprintf(ww_full,   "%d °C", vWW);
 
@@ -490,12 +490,12 @@ display:
       // 0: Haus, 1: Heizstab, 2: EQA
       // 3: Warmwasser, 4: Batterie, 5: Einspeisung
       Item items[6] = {
-        { lblHaus,        sHaus,    haus_energy,  haus_value     },
-        { lblHeiz,        heat_full,heat_energy,  heat_value     },
-        { lblEQA,         eqa_full, eqa_energy,   eqa_value      },
-        { lblWW,          ww_full,  ww_energy,    ww_value       },
-        { lblBatVerbr,    batp_full,batc_energy,  batc_value     },
-        { lblEinspeisung, eins_full,eins_energy,  eins_value     }
+        { lblHaus,        sHaus,      haus_energy,  haus_value     },
+        { lblHeiz,        heat_full,  heat_energy,  heat_value     },
+        { lblEQA,         eqa_full,   eqa_energy,   eqa_value      },
+        { lblWW,          ww_full,    ww_energy,    ww_value       },
+        { lblBatVerbr,    batp_full,  batc_energy,  batc_value     },
+        { lblEinspeisung, eins_full,  eins_energy,  eins_value     }
       };
 
       auto draw_row_fixed = [&](int start_index, int count,
@@ -505,16 +505,15 @@ display:
           Item &it_item = items[start_index + i];
           int cx = i * seg_w + seg_w / 2;
 
-          // Label jetzt mit tinyFont
           std::string lbl_str(it_item.label);
           int lbl_px = tiny_text_width(lbl_str);
-          it.printf(cx - lbl_px/2, yL, id(tinyFont), "%s", it_item.label);
-
-          // Wert weiter mit myFont
           int val_px = strlen(it_item.value) * cw_big;
-          it.printf(cx - val_px/2, yV, id(myFont), "%s", it_item.value);
 
-          // Energie-/Euro-Zeile (tinyFont), 5px nach unten verschoben
+          // Label im tinyFont, zentriert nach Tiny-LUT
+          it.printf(cx - lbl_px/2, yL, id(tinyFont), "%s", it_item.label);
+          // Leistung im myFont
+          it.printf(cx - val_px/2, yV, id(myFont),   "%s", it_item.value);
+
           if (it_item.energy_kwh > 0.0f) {
             char eb[48];
             sprintf(eb, "%.1f kWh (%.2f €)", it_item.energy_kwh, it_item.value_eur);
@@ -526,11 +525,13 @@ display:
       };
 
       // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
-      // yE: 230 -> 235
-      draw_row_fixed(0, 3, 160, 200, 235);
-      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung – 20px tiefer
-      // yE: 350 -> 355
-      draw_row_fixed(3, 3, 280, 320, 355);
+      // Label/Leistung/Energie mit Abständen 30/40 wie oben:
+      // 160 -> 190 -> 230
+      draw_row_fixed(0, 3, 160, 190, 230);
+
+      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung
+      // 20 px tiefer: 280 -> 310 -> 350
+      draw_row_fixed(3, 3, 280, 310, 350);
 
       // ----------------------------------------------------
       // SOC-BALKEN
