@@ -1,9 +1,10 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.41
-#  Änderungen ggü. 1.40:
-#    - Eurowert für Einspeisung verwendet nun festen Preis 0,0794 €/kWh
-#      (statt input_number.strompreis)
+#  Version: 1.42
+#  Änderungen ggü. 1.41:
+#    - Sämtliche Klammern in Leistungs- und Eurodarstellung entfernt:
+#        "X W (Y%)"      -> "X W Y%"
+#        "X kWh (Y €)"   -> "X kWh Y €"
 # --------------------------------------------------------------------
 
 esphome:
@@ -360,24 +361,24 @@ display:
         char pv_full[32], bez_full[32], bat_full[32];
 
         if (vPV > 0)
-          sprintf(pv_full, "%s (%d%%)", sPV, pv_pct);
+          sprintf(pv_full, "%s %d%%", sPV, pv_pct);
         else
           sprintf(pv_full, "%s", sPV);
 
         sprintf(bez_full, "%s", sBezug);
         sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € (eine Zeile) – Import (Netz) mit dynamischem Strompreis
+        // Energie + € (eine Zeile) – ohne Klammern
         char buf[48];
         std::string pv_today_str;
         std::string bez_today_str;
         std::string bat_today_str;
 
-        sprintf(buf, "%.1f kWh (%.2f €)", pv_today,   pv_value);
+        sprintf(buf, "%.1f kWh %.2f €", pv_today,   pv_value);
         pv_today_str = buf;
-        sprintf(buf, "%.1f kWh (%.2f €)", grid_today, grid_value);
+        sprintf(buf, "%.1f kWh %.2f €", grid_today, grid_value);
         bez_today_str = buf;
-        sprintf(buf, "%.1f kWh (%.2f €)", bat_today,  bat_value);
+        sprintf(buf, "%.1f kWh %.2f €", bat_today,  bat_value);
         bat_today_str = buf;
 
         // Labels (mit Prozent nur bei >1 aktivem Zufluss)
@@ -410,19 +411,19 @@ display:
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
-      sprintf(heat_full, "%s (%d%%)", sHeat, heat_pct);
+      sprintf(heat_full, "%s %d%%", sHeat, heat_pct);
       sprintf(eqa_full,  "%s", sEQA);
       sprintf(ww_full,   "%d °C", vWW);
 
       char batp_full[32], eins_full[32];
 
       if (vBatPlus > 0)
-        sprintf(batp_full, "%s (%d%%)", sBatPlusStr, batplus_pct);
+        sprintf(batp_full, "%s %d%%", sBatPlusStr, batplus_pct);
       else
         sprintf(batp_full, "%s", sBatPlusStr);
 
       if (vEinspeisung > 0)
-        sprintf(eins_full, "%s (%d%%)", sEins, grid_pct);
+        sprintf(eins_full, "%s %d%%", sEins, grid_pct);
       else
         sprintf(eins_full, "%s", sEins);
 
@@ -522,7 +523,7 @@ display:
 
           if (it_item.energy_kwh > 0.0f) {
             char eb[48];
-            sprintf(eb, "%.1f kWh (%.2f €)", it_item.energy_kwh, it_item.value_eur);
+            sprintf(eb, "%.1f kWh %.2f €", it_item.energy_kwh, it_item.value_eur);
             std::string es = eb;
             int e_px = tiny_text_width(es);
             it.printf(cx - e_px/2, yE, id(tinyFont), "%s", es.c_str());
