@@ -1,11 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.35
-#  Änderungen:
-#    - Verbrauchsblock: automatisches Ausblenden deaktiviert
-#    - Aufrücklogik entfernt: immer 2 feste Reihen à 3 Elemente
-#      Oben: Haus, Heizstab, EQA
-#      Unten: Warmwasser, Batterie, Einspeisung
+#  Version: 1.38
+#  Änderungen ggü. 1.36:
+#    - Heizstab-Energie ergänzt:
+#        sensor.powerocean_heizstab_energy_today
+#      inkl. Euro-Wert im Verbrauchsblock
+#    - TinyFont-LUT (tiny_char_width / tiny_text_width) wieder enthalten
 # --------------------------------------------------------------------
 
 esphome:
@@ -75,8 +75,20 @@ text_sensor:
     id: HeatPwr
     internal: true
   - platform: homeassistant
+    entity_id: sensor.powerocean_heizstab_energy_today
+    id: HeatEnergyToday
+    internal: true
+  - platform: homeassistant
     entity_id: sensor.shelly_plug_mercedes_eqa_250_power
     id: EQAPwr
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.shelly_plug_mercedes_eqa_250_energy_meter_today
+    id: EQAEnergyToday
+    internal: true
+  - platform: homeassistant
+    entity_id: sensor.iometer_gesamteinspeisung_today
+    id: EinsEnergyToday
     internal: true
   - platform: homeassistant
     entity_id: sensor.pufferspeicher_oben
@@ -105,14 +117,6 @@ text_sensor:
   - platform: homeassistant
     entity_id: input_number.strompreis
     id: Strompreis
-    internal: true
-  - platform: homeassistant
-    entity_id: sensor.shelly_plug_mercedes_eqa_250_energy_meter_today
-    id: EQAEnergyToday
-    internal: true
-  - platform: homeassistant
-    entity_id: sensor.iometer_gesamteinspeisung_today
-    id: EinsEnergyToday
     internal: true
 
 spi:
@@ -213,7 +217,7 @@ display:
           case ':':           return 7;
           case ' ':           return 8;
 
-          default: return 14; // Fallback (inkl. '€')
+          default: return 14; // Fallback (inkl. '€' etc.)
         }
       };
 
@@ -239,9 +243,10 @@ display:
       float vPV2Today        = as_float(id(PV2EnergyToday).state);
       float vBatDisToday     = as_float(id(BatDischargeToday).state);
       float vGridToday       = as_float(id(GridEnergyToday).state);
-      float vPrice           = as_float(id(Strompreis).state);
+      float vHeatToday       = as_float(id(HeatEnergyToday).state);
       float vEQAEnergyToday  = as_float(id(EQAEnergyToday).state);
       float vEinsEnergyToday = as_float(id(EinsEnergyToday).state);
+      float vPrice           = as_float(id(Strompreis).state);
 
       std::string sZeit = id(ZeitBisVoll).state;
 
@@ -269,13 +274,13 @@ display:
 
       // Tageserträge + Werte (Zufluss-Bereich)
       float pv_today   = vPV1Today + vPV2Today;
-      float pv_value   = pv_today   * vPrice;
+      float pv_value   = pv_today     * vPrice;
 
       float bat_today  = vBatDisToday;
-      float bat_value  = bat_today  * vPrice;
+      float bat_value  = bat_today    * vPrice;
 
       float grid_today = vGridToday;
-      float grid_value = grid_today * vPrice;
+      float grid_value = grid_today   * vPrice;
 
       // ---- Formatstrings für Leistungen ----
       char sHaus[20], sPV[20], sHeat[20], sEQA[20],
@@ -354,7 +359,7 @@ display:
         sprintf(bez_full, "%s", sBezug);
         sprintf(bat_full, "%s", sBatMinusStr);
 
-        // Energie + € (1 Nachkommastelle für kWh)
+        // Energie + € in einer Zeile, mit 1 Nachkommastelle für kWh
         char buf[48];
         std::string pv_today_str;
         std::string bez_today_str;
@@ -369,14 +374,14 @@ display:
 
         // Labels (mit Prozent nur bei >1 aktivem Zufluss)
         char lblSolar[32]      = "Solar";
-        char lblBezug[32]      = "Netz";
+        char lblBezugLbl[32]   = "Netz";
         char lblBatterieIn[32] = "Batterie";
 
         if (totalIn > 0 && active_inflow_count > 1) {
           if (shareSolar > 0)
             sprintf(lblSolar, "Solar %d%%", shareSolar);
           if (shareBezug > 0)
-            sprintf(lblBezug, "Netz %d%%", shareBezug);
+            sprintf(lblBezugLbl, "Netz %d%%", shareBezug);
           if (shareBatIn > 0)
             sprintf(lblBatterieIn, "Batterie %d%%", shareBatIn);
         }
@@ -384,7 +389,7 @@ display:
         // Reihenfolge: Solar – Netz – Batterie
         idx = 0;
         draw_inflow(lblSolar,      pv_full,  pv_today_str);
-        draw_inflow(lblBezug,      bez_full, bez_today_str);
+        draw_inflow(lblBezugLbl,   bez_full, bez_today_str);
         draw_inflow(lblBatterieIn, bat_full, bat_today_str);
       }
 
@@ -393,10 +398,12 @@ display:
 
       // ----------------------------------------------------
       // VERBRAUCHER – feste 2×3-Anordnung + Energie-Zeile
+      //   obere Reihe: Haus, Heizstab, EQA
+      //   untere Reihe: Warmwasser, Batterie, Einspeisung (20px nach unten)
       // ----------------------------------------------------
       char h_full[32], heat_full[32], eqa_full[32], ww_full[32];
       sprintf(h_full,    "%s", sHaus);
-      sprintf(heat_full, "%s (%d%%)", sHeat, heat_pct);
+      sprintf(heat_full, "%s", sHeat);
       sprintf(eqa_full,  "%s", sEQA);
       sprintf(ww_full,   "%d °C", vWW);
 
@@ -461,13 +468,13 @@ display:
       // Energie/EUR für Verbraucher
       float haus_energy   = 0.0f;
       float haus_value    = 0.0f;
-      float heat_energy   = 0.0f;
-      float heat_value    = 0.0f;
+      float heat_energy   = vHeatToday;
+      float heat_value    = vHeatToday * vPrice;
       float eqa_energy    = vEQAEnergyToday;
       float eqa_value     = vEQAEnergyToday * vPrice;
       float ww_energy     = 0.0f;
       float ww_value      = 0.0f;
-      float batc_energy   = bat_today;              // Batterie-Entladung
+      float batc_energy   = bat_today;
       float batc_value    = bat_value;
       float eins_energy   = vEinsEnergyToday;
       float eins_value    = vEinsEnergyToday * vPrice;
@@ -516,8 +523,8 @@ display:
 
       // Obere Verbraucher-Reihe: Haus, Heizstab, EQA
       draw_row_fixed(0, 3, 160, 200, 230);
-      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung
-      draw_row_fixed(3, 3, 260, 300, 330);
+      // Untere Verbraucher-Reihe: Warmwasser, Batterie, Einspeisung – 20px tiefer
+      draw_row_fixed(3, 3, 280, 320, 350);
 
       // ----------------------------------------------------
       // SOC-BALKEN
