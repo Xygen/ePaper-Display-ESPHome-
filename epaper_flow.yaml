@@ -1,9 +1,11 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.39_unterhaltung_arrows_align
-#  Änderungen ggü. 1.38:
-#    - Startpunkt aller GESAMT→Verbraucher-Pfeile vereinheitlicht:
-#      * Gemeinsamer arrow_y_top direkt unterhalb des GESAMT-Elements
+#  Version: 1.40_refactor_arrows
+#  Änderungen ggü. 1.39_unterhaltung_arrows_align:
+#    - Gemeinsame Pfeil-Hilfsfunktion draw_vertical_arrow()
+#    - Zentrale P_MAX_POWER / TH_MAX_IN / TH_MAX_OUT Konstanten
+#    - Unbenutzte Fonts (smallFont, tableFont) entfernt
+#    - Unbenutzte Format-Variable sHaus entfernt
 # --------------------------------------------------------------------
 
 esphome:
@@ -38,17 +40,11 @@ font:
   - file: "gfonts://Inter@600"
     id: myFont        # groß (z.B. GESAMT, Zufluss-Werte)
     size: 40
-  - file: "gfonts://Inter@700"
-    id: smallFont
-    size: 30
   - file: "gfonts://Inter@600"
     id: tinyFont      # Standard klein (Header, Zufluss)
     size: 28
   - file: "gfonts://Inter@600"
     id: unitFont
-    size: 20
-  - file: "gfonts://Inter@600"
-    id: tableFont
     size: 20
   # kleinere Fonts für Verbraucher-Elemente (Mitte + unten)
   - file: "gfonts://Inter@600"
@@ -230,7 +226,9 @@ display:
         return (int) lroundf(value * 100.0f / (float) total);
       };
 
-      // Layout-Konstanten
+      // ------------------------------
+      // Layout-Konstanten & Pfeil-Config
+      // ------------------------------
       const int screen_w      = 800;
 
       // Zuflussblock (oben)
@@ -258,6 +256,50 @@ display:
       const int bw = 560;
       const int bh = 20;
       const int by = 455;
+
+      // Pfeil-Konstanten
+      const float P_MAX_POWER       = 12600.0f;  // 12,6 kW
+      const int   TH_MAX_IN         = 40;        // max Dicke oben
+      const int   TH_MAX_OUT        = 40;        // max Dicke unten/mittig
+      const int   TH_MIN_POSITIVE   = 1;         // min sichtbare Dicke
+
+      const int   ARROW_OFFSET_BELOW_INFLOW  = 35; // unter inflow_yExtra
+      const int   ARROW_OFFSET_BELOW_GESAMT  = 50; // Startpunkt aller GESAMT→Pfeile
+      const int   ARROW_OFFSET_ABOVE_LABEL   = 0;  // Spitzen-Abstand vor Label
+
+      // Gemeinsamer Start aller GESAMT→Verbraucher-Pfeile
+      const int arrow_y_top_gesamt = gesamt_y + ARROW_OFFSET_BELOW_GESAMT;
+
+      // Gemeinsame Hilfsfunktion: vertikalen Pfeil zeichnen
+      auto draw_vertical_arrow = [&it](int cx,
+                                       int y_top,
+                                       int y_tip,
+                                       int pwr,
+                                       float P_MAX,
+                                       int TH_MAX,
+                                       int TH_MIN) {
+        if (pwr <= 0 || TH_MAX <= 0) return;
+
+        float ratio = pwr / P_MAX;
+        if (ratio > 1.0f) ratio = 1.0f;
+
+        int thickness = (int) lroundf(ratio * TH_MAX);
+        if (thickness < TH_MIN) thickness = TH_MIN;
+
+        int half = thickness / 2;
+        int arrow_head = std::max(4, (int) lroundf(thickness * 1.3f));
+
+        int shaft_h = y_tip - y_top - arrow_head;
+        if (shaft_h > 0) {
+          it.filled_rectangle(cx - half, y_top, thickness, shaft_h);
+        }
+
+        it.filled_triangle(
+          cx, y_tip,
+          cx - arrow_head, y_tip - arrow_head,
+          cx + arrow_head, y_tip - arrow_head
+        );
+      };
 
       // ---- Werte laden ----
       int   vHausRaw       = as_int(id(SysLoadPwr).state);
@@ -288,7 +330,7 @@ display:
       float vUnterhaltungEnergyToday = as_float(id(UnterhaltungEnergyToday).state);
       float vPrice           = as_float(id(Strompreis).state);
 
-      std::string sZeit = id(ZeitBisVoll).state;  // aktuell ungenutzt
+      // std::string sZeit = id(ZeitBisVoll).state;  // aktuell ungenutzt
 
       // Batterie-Leistung aufteilen
       int vBatMinus = (vBat < 0) ? -vBat : 0;
@@ -367,16 +409,15 @@ display:
       float eins_value  = vEinsEnergyToday * 0.0794f;
 
       // Formatstrings
-      char sHaus[20], sPV[20], sHeat[20], sEQA[20],
+      char sPV[20], sHeat[20], sEQA[20],
            sBezug[20], sEins[20], sBatMinusStr[20], sBatPlusStr[20],
            sHeizenStr[20], sKochen[20], sWaschen[20], sRestPwr[20];
 
-      fmt_power(sHaus,       vHausRaw);
       fmt_power(sPV,         vPV);
       fmt_power(sHeat,       vHeat);
       fmt_power(sEQA,        vEQA);
       fmt_power(sBezug,      vBezug);
-      fmt_power(sEins,      vEinspeisung);
+      fmt_power(sEins,       vEinspeisung);
       fmt_power(sBatMinusStr, vBatMinus);
       fmt_power(sBatPlusStr,  vBatPlus);
       fmt_power(sHeizenStr,  vHeizenNet);
@@ -498,28 +539,15 @@ display:
       }
 
       // ----------------------------------------------------
-      // Pfeile von Solar / Netz / Batterie nach unten zum GESAMT-Block
-      // Dicke ∝ Leistung, max 20 px bei 12,6 kW
+      // Pfeile von Solar / Netz / Batterie zum GESAMT-Block
+      // Dicke ∝ Leistung, max TH_MAX_IN bei P_MAX_POWER
       // ----------------------------------------------------
       {
         const int inflow_count = 3;
         const int seg_w = screen_w / inflow_count;
 
-        const int arrow_y_top = inflow_yExtra + 40; // unter Zufluss
-        const int arrow_y_tip = gesamt_y - 5;       // kurz über GESAMT
-
-        const float P_MAX = 5000.0f;
-        const int   TH_MAX = 30;
-        const int   TH_MIN_POSITIVE = 1;
-
-        auto compute_th = [&](int pwr) -> int {
-          if (pwr <= 0) return 0;
-          float ratio = pwr / P_MAX;
-          if (ratio > 1.0f) ratio = 1.0f;
-          int t = (int) lroundf(ratio * TH_MAX);
-          if (t < TH_MIN_POSITIVE) t = TH_MIN_POSITIVE;
-          return t;
-        };
+        const int arrow_y_top = inflow_yExtra + ARROW_OFFSET_BELOW_INFLOW; // unter Zufluss
+        const int arrow_y_tip = gesamt_y - ARROW_OFFSET_ABOVE_LABEL;       // kurz über GESAMT
 
         int vals[3];
         vals[0] = pSolar;
@@ -528,49 +556,24 @@ display:
 
         for (int i = 0; i < 3; i++) {
           int cx = i * seg_w + seg_w / 2;
-          int thickness = compute_th(vals[i]);
-          if (thickness <= 0) continue;
-
-          int half = thickness / 2;
-          int arrow_head = std::max(4, (int) lroundf(thickness * 1.3f));
-
-          int shaft_h = arrow_y_tip - arrow_y_top - arrow_head;
-          if (shaft_h > 0) {
-            it.filled_rectangle(cx - half, arrow_y_top, thickness, shaft_h);
-          }
-
-          it.filled_triangle(
-            cx, arrow_y_tip,
-            cx - arrow_head, arrow_y_tip - arrow_head,
-            cx + arrow_head, arrow_y_tip - arrow_head
-          );
+          draw_vertical_arrow(cx,
+                              arrow_y_top,
+                              arrow_y_tip,
+                              vals[i],
+                              P_MAX_POWER,
+                              TH_MAX_IN,
+                              TH_MIN_POSITIVE);
         }
       }
-
-      // Gemeinsamer Startpunkt aller GESAMT→Verbraucher-Pfeile:
-      const int arrow_y_top_gesamt = gesamt_y + 50;
 
       // ----------------------------------------------------
       // Pfeile von GESAMT zu den mittleren Verbrauchern
       // (Heizen / Kochen / Waschen / Rest)
-      // Dicke ∝ Leistung, max 40 px bei 12,6 kW
+      // Dicke ∝ Leistung, max TH_MAX_OUT
       // ----------------------------------------------------
       {
-        const float P_MAX        = 5000.0f;
-        const int   TH_MAX_OUT   = 30;
-        const int   TH_MIN_POS   = 1;
-
-        const int arrow_y_top = arrow_y_top_gesamt;   // jetzt identisch für alle GESAMT→Pfeile
-        const int arrow_y_tip = mid_yLabel - 5;       // kurz über mittleren Labels
-
-        auto compute_th_out = [&](int pwr) -> int {
-          if (pwr <= 0) return 0;
-          float ratio = pwr / P_MAX;
-          if (ratio > 1.0f) ratio = 1.0f;
-          int t = (int) lroundf(ratio * TH_MAX_OUT);
-          if (t < TH_MIN_POS) t = TH_MIN_POS;
-          return t;
-        };
+        const int arrow_y_top = arrow_y_top_gesamt;         // gemeinsamer Start
+        const int arrow_y_tip = mid_yLabel - ARROW_OFFSET_ABOVE_LABEL;
 
         int vals[4];
         vals[0] = vHeizenNet;
@@ -579,48 +582,25 @@ display:
         vals[3] = vRest;
 
         for (int i = 0; i < 4; i++) {
-          int cx = (screen_w / 5) * (i + 1);
-
-          int thickness = compute_th_out(vals[i]);
-          if (thickness <= 0) continue;
-
-          int half = thickness / 2;
-          int arrow_head = std::max(4, (int) lroundf(thickness * 1.3f));
-
-          int shaft_h = arrow_y_tip - arrow_y_top - arrow_head;
-          if (shaft_h > 0) {
-            it.filled_rectangle(cx - half, arrow_y_top, thickness, shaft_h);
-          }
-
-          it.filled_triangle(
-            cx, arrow_y_tip,
-            cx - arrow_head, arrow_y_tip - arrow_head,
-            cx + arrow_head, arrow_y_tip - arrow_head
-          );
+          int cx = (screen_w / 5) * (i + 1);  // 160, 320, 480, 640
+          draw_vertical_arrow(cx,
+                              arrow_y_top,
+                              arrow_y_tip,
+                              vals[i],
+                              P_MAX_POWER,
+                              TH_MAX_OUT,
+                              TH_MIN_POSITIVE);
         }
       }
 
       // ----------------------------------------------------
       // Pfeile von GESAMT zu den unteren Verbrauchern
       // (Unterhaltung / Heizstab / EQA / Batterie / Export)
-      // Dicke ∝ Leistung, max 40 px bei 12,6 kW
+      // Dicke ∝ Leistung, max TH_MAX_OUT
       // ----------------------------------------------------
       {
-        const float P_MAX        = 5000.0f;
-        const int   TH_MAX_OUT   = 30;
-        const int   TH_MIN_POS   = 1;
-
-        const int arrow_y_top = arrow_y_top_gesamt;     // identischer Start wie mittlere Pfeile
-        const int arrow_y_tip = outflow_yLabel - 5;     // kurz über unteren Labels
-
-        auto compute_th_out_low = [&](int pwr) -> int {
-          if (pwr <= 0) return 0;
-          float ratio = pwr / P_MAX;
-          if (ratio > 1.0f) ratio = 1.0f;
-          int t = (int) lroundf(ratio * TH_MAX_OUT);
-          if (t < TH_MIN_POS) t = TH_MIN_POS;
-          return t;
-        };
+        const int arrow_y_top = arrow_y_top_gesamt;          // gemeinsamer Start
+        const int arrow_y_tip = outflow_yLabel - ARROW_OFFSET_ABOVE_LABEL;
 
         int vals[5];
         vals[0] = vUnterhaltung;
@@ -634,23 +614,13 @@ display:
 
         for (int i = 0; i < 5; i++) {
           int cx = i * seg_w + seg_w / 2;
-
-          int thickness = compute_th_out_low(vals[i]);
-          if (thickness <= 0) continue;
-
-          int half = thickness / 2;
-          int arrow_head = std::max(4, (int) lroundf(thickness * 1.3f));
-
-          int shaft_h = arrow_y_tip - arrow_y_top - arrow_head;
-          if (shaft_h > 0) {
-            it.filled_rectangle(cx - half, arrow_y_top, thickness, shaft_h);
-          }
-
-          it.filled_triangle(
-            cx, arrow_y_tip,
-            cx - arrow_head, arrow_y_tip - arrow_head,
-            cx + arrow_head, arrow_y_tip - arrow_head
-          );
+          draw_vertical_arrow(cx,
+                              arrow_y_top,
+                              arrow_y_tip,
+                              vals[i],
+                              P_MAX_POWER,
+                              TH_MAX_OUT,
+                              TH_MIN_POSITIVE);
         }
       }
 
