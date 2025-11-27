@@ -1,6 +1,6 @@
 # --------------------------------------------------------------------
 #  ePaper Display – PowerOcean Dashboard
-#  Version: 1.40_refactor_arrows
+#  Version: 1.41_refactor_arrows
 #  Änderungen ggü. 1.39_unterhaltung_arrows_align:
 #    - Gemeinsame Pfeil-Hilfsfunktion draw_vertical_arrow()
 #    - Zentrale P_MAX_POWER / TH_MAX_IN / TH_MAX_OUT Konstanten
@@ -252,13 +252,13 @@ display:
       const int outflow_yCost   = 415;  // 4. Zeile: Kosten (€)
 
       // SOC-Bereich (unten)
-      const int bx = 120;
-      const int bw = 560;
+      const int bx = 90;
+      const int bw = 620;
       const int bh = 20;
       const int by = 455;
 
       // Pfeil-Konstanten
-      const float P_MAX_POWER       = 12600.0f;  // 12,6 kW
+      const float P_MAX_POWER       = 7000.0f;  // 12,6 kW
       const int   TH_MAX_IN         = 40;        // max Dicke oben
       const int   TH_MAX_OUT        = 40;        // max Dicke unten/mittig
       const int   TH_MIN_POSITIVE   = 1;         // min sichtbare Dicke
@@ -287,7 +287,7 @@ display:
         if (thickness < TH_MIN) thickness = TH_MIN;
 
         int half = thickness / 2;
-        int arrow_head = std::max(4, (int) lroundf(thickness * 1.3f));
+        int arrow_head = std::max(4, (int) lroundf(thickness * 1.0f));
 
         int shaft_h = y_tip - y_top - arrow_head;
         if (shaft_h > 0) {
@@ -791,13 +791,13 @@ display:
       {
         char sSocVal[8];
         sprintf(sSocVal, "%d%%", vSOC);
-        it.printf(bx - 10, by - 5, id(tinyFont), TextAlign::TOP_RIGHT, "%s", sSocVal);
+        it.printf(bx - 10, by - 10, id(tinyFont), TextAlign::TOP_RIGHT, "%s", sSocVal);
       }
 
       {
         char sWW[16];
         sprintf(sWW, "%d°C", vWW);
-        it.printf(bx + bw + 10, by - 5, id(tinyFont), TextAlign::TOP_LEFT, "%s", sWW);
+        it.printf(bx + bw + 10, by - 10, id(tinyFont), TextAlign::TOP_LEFT, "%s", sWW);
       }
 
       it.rectangle(bx,by,bw,bh);
